@@ -1,0 +1,17 @@
+appname=clash.meta
+version=1.19.27-27
+display_name=Clash.Meta
+desc=Clash.Meta mihomo core with built-in MetaCubeXD web dashboard.
+platform=x86
+source=thirdparty
+maintainer=MetaCubeX
+maintainer_url=https://github.com/MetaCubeX/mihomo
+distributor=local
+distributor_url=https://github.com/MetaCubeX/mihomo
+os_min_version=1.2.0
+desktop_uidir=ui
+desktop_applaunchname=clash.meta.Application
+service_port=9090
+checkport=true
+disable_authorization_path=true
+changelog=Add timeout recovery for embedded runtime import and disable subscription health checks by default.

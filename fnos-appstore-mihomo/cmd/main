@@ -1,0 +1,1033 @@
+#!/bin/bash
+
+APP_NAME="clash.meta"
+APP_ROOT="/var/apps/${APP_NAME}"
+APP_HOME="${TRIM_APPDEST:-${APP_ROOT}/target}"
+APP_ETC="${TRIM_PKGETC:-/var/apps/${APP_NAME}/etc}"
+APP_VAR="${TRIM_PKGVAR:-/var/apps/${APP_NAME}/var}"
+
+get_share_dir() {
+    if [ -n "${TRIM_DATA_SHARE_PATHS}" ]; then
+        echo "${TRIM_DATA_SHARE_PATHS}" | tr ':' '\n' | while read -r item; do
+            [ -n "${item}" ] && echo "${item}" && break
+        done
+        return
+    fi
+
+    if [ -d "/var/apps/${APP_NAME}/shares/${APP_NAME}" ]; then
+        echo "/var/apps/${APP_NAME}/shares/${APP_NAME}"
+        return
+    fi
+
+    echo "${APP_VAR}/share"
+}
+
+APP_SHARE="$(get_share_dir)"
+CONFIG_DIR="${APP_SHARE}/config"
+LOG_DIR="${APP_SHARE}/logs"
+RUN_DIR="${APP_VAR}/run"
+BIN_DIR="${APP_VAR}/bin"
+RUNTIME_DASHBOARD_DIR="${APP_VAR}/dashboard"
+PID_FILE="${RUN_DIR}/mihomo.pid"
+LOG_FILE="${LOG_DIR}/mihomo.log"
+SOURCE_BIN="${APP_HOME}/mihomo"
+BIN="${BIN_DIR}/mihomo"
+CONFIG_FILE="${CONFIG_DIR}/config.yaml"
+SECRET_FILE="${CONFIG_DIR}/secret"
+TEMPLATE_FILE="${APP_HOME}/config.default.yaml"
+DASHBOARD_SOURCE_DIR="${APP_HOME}/dashboard"
+DASHBOARD_DIR="${RUNTIME_DASHBOARD_DIR}"
+GEODATA_DIR="${APP_HOME}/geodata"
+WIZARD_DIR="${CONFIG_DIR}/wizard"
+WIZARD_MODE_FILE="${WIZARD_DIR}/mode"
+WIZARD_SUBSCRIPTION_FILE="${WIZARD_DIR}/subscription.url"
+WIZARD_CONFIG_URL_FILE="${WIZARD_DIR}/config.url"
+FALLBACK_WIZARD_DIR="${APP_VAR}/wizard"
+FALLBACK_WIZARD_MODE_FILE="${FALLBACK_WIZARD_DIR}/mode"
+FALLBACK_WIZARD_SUBSCRIPTION_FILE="${FALLBACK_WIZARD_DIR}/subscription.url"
+FALLBACK_WIZARD_CONFIG_URL_FILE="${FALLBACK_WIZARD_DIR}/config.url"
+
+write_temp_log() {
+    if [ -n "${TRIM_TEMP_LOGFILE}" ]; then
+        {
+            echo "Clash.Meta startup failed."
+            echo "APP_HOME=${APP_HOME}"
+            echo "APP_ETC=${APP_ETC}"
+            echo "APP_VAR=${APP_VAR}"
+            echo "APP_SHARE=${APP_SHARE}"
+            echo "SOURCE_BIN=${SOURCE_BIN}"
+            echo "BIN=${BIN}"
+            echo "CONFIG_FILE=${CONFIG_FILE}"
+            echo "SECRET_FILE=${SECRET_FILE}"
+            echo "LOG_FILE=${LOG_FILE}"
+            echo "DASHBOARD_SOURCE_DIR=${DASHBOARD_SOURCE_DIR}"
+            echo "DASHBOARD_DIR=${DASHBOARD_DIR}"
+            echo "GEODATA_DIR=${GEODATA_DIR}"
+            echo
+            [ -f "${LOG_FILE}" ] && tail -n 80 "${LOG_FILE}"
+        } > "${TRIM_TEMP_LOGFILE}" 2>/dev/null || true
+    fi
+}
+
+log_msg() {
+    mkdir -p "${LOG_DIR}"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" >> "${LOG_FILE}"
+}
+
+trim_value() {
+    printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+read_first_line() {
+    local file="$1"
+    if [ -s "${file}" ]; then
+        head -n 1 "${file}" | tr -d '\r'
+    fi
+}
+
+get_wizard_env_value() {
+    local key="$1"
+    local upper_key
+    upper_key="$(printf '%s' "${key}" | tr '[:lower:]' '[:upper:]')"
+    eval "printf '%s' \"\${${key}:-\${${upper_key}:-}}\""
+}
+
+get_wizard_value() {
+    local key="$1"
+    local file="$2"
+    local fallback_file="$3"
+    local value
+
+    value="$(get_wizard_env_value "${key}")"
+    if [ -z "${value}" ] && [ -n "${file}" ]; then
+        value="$(read_first_line "${file}")"
+    fi
+    if [ -z "${value}" ] && [ -n "${fallback_file}" ]; then
+        value="$(read_first_line "${fallback_file}")"
+    fi
+
+    trim_value "${value}"
+}
+
+is_valid_http_url() {
+    local value="$1"
+
+    case "${value}" in
+    http://*|https://*)
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+
+    if [ "${#value}" -gt 4096 ]; then
+        return 1
+    fi
+
+    if printf '%s' "${value}" | LC_ALL=C grep -q '[[:space:]"\\]'; then
+        return 1
+    fi
+
+    return 0
+}
+
+decode_clash_url_value() {
+    printf '%s' "$1" | sed \
+        -e 's/%2[Bb]/+/g' \
+        -e 's/%3[Aa]/:/g' -e 's/%2[Ff]/\//g' \
+        -e 's/%3[Ff]/?/g' -e 's/%26/\&/g' \
+        -e 's/%3[Dd]/=/g' -e 's/%25/%/g'
+}
+
+extract_clash_install_config_url() {
+    local value="$1"
+    local query
+    local encoded_url
+
+    case "${value}" in
+    clash://install-config\?*)
+        query="${value#clash://install-config?}"
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+
+    encoded_url="$(printf '%s\n' "${query}" | tr '&' '\n' | sed -n 's/^url=//p' | head -n 1)"
+    if [ -z "${encoded_url}" ]; then
+        return 1
+    fi
+
+    decode_clash_url_value "${encoded_url}"
+}
+
+normalize_config_url() {
+    local value="$1"
+    local extracted
+
+    case "${value}" in
+    clash://install-config\?*)
+        extracted="$(extract_clash_install_config_url "${value}")" || return 1
+        value="$(trim_value "${extracted}")"
+        ;;
+    esac
+
+    is_valid_http_url "${value}" || return 1
+    printf '%s' "${value}"
+}
+
+extract_http_host() {
+    local value="$1"
+    local host
+
+    case "${value}" in
+    http://*)
+        host="${value#http://}"
+        ;;
+    https://*)
+        host="${value#https://}"
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+
+    host="${host%%/*}"
+    host="${host##*@}"
+    host="${host%%:*}"
+    host="$(trim_value "${host}")"
+    [ -n "${host}" ] || return 1
+    printf '%s' "${host}"
+}
+
+is_valid_domain_rule_host() {
+    local host="$1"
+
+    [ -n "${host}" ] || return 1
+    case "${host}" in
+    *[!A-Za-z0-9.-]*|.*|*.|*..*)
+        return 1
+        ;;
+    esac
+
+    if printf '%s' "${host}" | LC_ALL=C grep -Eq '^[0-9.]+$'; then
+        return 1
+    fi
+
+    return 0
+}
+
+mark_wizard_config_applied() {
+    mkdir -p "${WIZARD_DIR}" || return 1
+    printf '%s\n' "$1" > "${WIZARD_DIR}/configured_by_install_wizard" || return 1
+}
+
+write_subscription_config() {
+    local subscription_url="$1"
+    local subscription_host
+    local subscription_domain_rule=""
+
+    subscription_host="$(extract_http_host "${subscription_url}" 2>/dev/null || true)"
+    if is_valid_domain_rule_host "${subscription_host}"; then
+        subscription_domain_rule="  - DOMAIN-SUFFIX,${subscription_host},DIRECT"
+    fi
+
+    cat > "${CONFIG_FILE}" <<EOF
+mixed-port: 7899
+allow-lan: true
+bind-address: "*"
+mode: rule
+log-level: info
+ipv6: false
+external-controller: 0.0.0.0:9090
+external-ui: dashboard
+secret: ""
+geo-auto-update: false
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+    - 1.1.1.1
+    - 8.8.8.8
+  fallback:
+    - 1.1.1.1
+    - 8.8.8.8
+
+proxy-providers:
+  subscription:
+    type: http
+    url: "${subscription_url}"
+    proxy: DIRECT
+    interval: 86400
+    path: ./providers/subscription.yaml
+    health-check:
+      enable: false
+      interval: 600
+      url: https://www.gstatic.com/generate_204
+
+proxies: []
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - DIRECT
+    use:
+      - subscription
+
+rules:
+${subscription_domain_rule}
+  - MATCH,PROXY
+EOF
+
+    mark_wizard_config_applied "subscription" || return 1
+    log_msg "initial config created from install wizard subscription URL"
+}
+
+subscription_provider_has_proxy() {
+    awk '
+        /^[[:space:]]*proxy-providers[[:space:]]*:/ { in_providers = 1; next }
+        in_providers && /^[^[:space:]][^:]*:/ { in_providers = 0; in_subscription = 0 }
+        in_providers && /^[[:space:]][[:space:]]subscription[[:space:]]*:/ { in_subscription = 1; next }
+        in_subscription && /^[[:space:]][[:space:]][^[:space:]][^:]*:/ { in_subscription = 0 }
+        in_subscription && /^[[:space:]][[:space:]][[:space:]][[:space:]]proxy[[:space:]]*:/ { found = 1 }
+        END { exit(found ? 0 : 1) }
+    ' "${CONFIG_FILE}"
+}
+
+get_subscription_provider_url() {
+    awk '
+        /^[[:space:]]*proxy-providers[[:space:]]*:/ { in_providers = 1; next }
+        in_providers && /^[^[:space:]][^:]*:/ { in_providers = 0; in_subscription = 0 }
+        in_providers && /^[[:space:]][[:space:]]subscription[[:space:]]*:/ { in_subscription = 1; next }
+        in_subscription && /^[[:space:]][[:space:]][^[:space:]][^:]*:/ { in_subscription = 0 }
+        in_subscription && /^[[:space:]][[:space:]][[:space:]][[:space:]]url[[:space:]]*:/ {
+            value = $0
+            sub(/^[[:space:]]*url[[:space:]]*:[[:space:]]*/, "", value)
+            sub(/[[:space:]]*#.*/, "", value)
+            gsub(/^"/, "", value)
+            gsub(/"$/, "", value)
+            gsub(/^'\''/, "", value)
+            gsub(/'\''$/, "", value)
+            print value
+            exit
+        }
+    ' "${CONFIG_FILE}"
+}
+
+add_subscription_provider_direct_proxy() {
+    local tmp_file="${CONFIG_FILE}.provider-direct"
+
+    awk '
+        /^[[:space:]]*proxy-providers[[:space:]]*:/ { in_providers = 1 }
+        in_providers && /^[^[:space:]][^:]*:/ && $0 !~ /^[[:space:]]*proxy-providers[[:space:]]*:/ {
+            in_providers = 0
+            in_subscription = 0
+        }
+        in_providers && /^[[:space:]][[:space:]]subscription[[:space:]]*:/ { in_subscription = 1 }
+        in_subscription && /^[[:space:]][[:space:]][^[:space:]][^:]*:/ && $0 !~ /^[[:space:]][[:space:]]subscription[[:space:]]*:/ {
+            in_subscription = 0
+        }
+        {
+            print
+            if (in_subscription && $0 ~ /^[[:space:]][[:space:]][[:space:]][[:space:]]url[[:space:]]*:/ && inserted == 0) {
+                print "    proxy: DIRECT"
+                inserted = 1
+            }
+        }
+    ' "${CONFIG_FILE}" > "${tmp_file}" && mv "${tmp_file}" "${CONFIG_FILE}"
+}
+
+disable_subscription_provider_health_check() {
+    local tmp_file="${CONFIG_FILE}.provider-health-check"
+
+    awk '
+        BEGIN {
+            in_providers = 0
+            in_subscription = 0
+            in_health_check = 0
+            changed = 0
+        }
+        /^[[:space:]]*proxy-providers[[:space:]]*:/ {
+            in_providers = 1
+            in_subscription = 0
+            in_health_check = 0
+            print
+            next
+        }
+        in_providers && /^[^[:space:]][^:]*:/ {
+            in_providers = 0
+            in_subscription = 0
+            in_health_check = 0
+        }
+        in_providers && /^[[:space:]][[:space:]]subscription[[:space:]]*:/ {
+            in_subscription = 1
+            in_health_check = 0
+            print
+            next
+        }
+        in_subscription && /^[[:space:]][[:space:]][^[:space:]][^:]*:/ && $0 !~ /^[[:space:]][[:space:]]subscription[[:space:]]*:/ {
+            in_subscription = 0
+            in_health_check = 0
+        }
+        in_subscription && /^[[:space:]][[:space:]][[:space:]][[:space:]]health-check[[:space:]]*:/ {
+            in_health_check = 1
+            print
+            next
+        }
+        in_health_check && $0 !~ /^[[:space:]][[:space:]][[:space:]][[:space:]][[:space:]][[:space:]][^[:space:]][^:]*:/ && $0 !~ /^[[:space:]]*$/ {
+            in_health_check = 0
+        }
+        in_health_check && /^[[:space:]][[:space:]][[:space:]][[:space:]][[:space:]][[:space:]]enable[[:space:]]*:[[:space:]]*true([[:space:]]*#.*)?$/ {
+            print "      enable: false"
+            changed = 1
+            next
+        }
+        { print }
+        END { exit(changed ? 0 : 2) }
+    ' "${CONFIG_FILE}" > "${tmp_file}"
+
+    local status=$?
+    if [ "${status}" -eq 0 ]; then
+        mv "${tmp_file}" "${CONFIG_FILE}" || return 1
+        return 0
+    fi
+
+    rm -f "${tmp_file}"
+    if [ "${status}" -eq 2 ]; then
+        return 2
+    fi
+
+    return 1
+}
+
+subscription_domain_direct_rule_exists() {
+    local host="$1"
+    local rule="  - DOMAIN-SUFFIX,${host},DIRECT"
+
+    if ! is_valid_domain_rule_host "${host}"; then
+        return 1
+    fi
+
+    LC_ALL=C grep -Fq "${rule}" "${CONFIG_FILE}"
+}
+
+add_subscription_domain_direct_rule() {
+    local host="$1"
+    local tmp_file="${CONFIG_FILE}.subscription-domain-direct"
+    local rule="  - DOMAIN-SUFFIX,${host},DIRECT"
+
+    if ! is_valid_domain_rule_host "${host}"; then
+        return 0
+    fi
+
+    awk -v rule="${rule}" '
+        /^[[:space:]]*-[[:space:]]*MATCH,PROXY[[:space:]]*$/ && inserted == 0 {
+            print rule
+            inserted = 1
+        }
+        { print }
+    ' "${CONFIG_FILE}" > "${tmp_file}" && mv "${tmp_file}" "${CONFIG_FILE}"
+}
+
+replace_generated_mixed_port() {
+    local tmp_file="${CONFIG_FILE}.mixed-port"
+
+    awk '
+        BEGIN { changed = 0 }
+        /^[[:space:]]*mixed-port[[:space:]]*:[[:space:]]*7890([[:space:]]*#.*)?$/ {
+            print "mixed-port: 7899"
+            changed = 1
+            next
+        }
+        { print }
+        END { exit(changed ? 0 : 2) }
+    ' "${CONFIG_FILE}" > "${tmp_file}"
+
+    local status=$?
+    if [ "${status}" -eq 0 ]; then
+        mv "${tmp_file}" "${CONFIG_FILE}" || return 1
+        return 0
+    fi
+
+    rm -f "${tmp_file}"
+    if [ "${status}" -eq 2 ]; then
+        return 2
+    fi
+
+    return 1
+}
+
+migrate_bootstrap_dns() {
+    local tmp_file="${CONFIG_FILE}.bootstrap-dns"
+
+    if ! LC_ALL=C grep -Eq 'https://(dns\.alidns\.com|doh\.pub|1\.1\.1\.1|8\.8\.8\.8)/dns-query' "${CONFIG_FILE}"; then
+        return 2
+    fi
+
+    awk '
+        BEGIN {
+            in_dns = 0
+            skip_block = 0
+        }
+        function print_default_nameserver() {
+            print "  default-nameserver:"
+            print "    - 223.5.5.5"
+            print "    - 119.29.29.29"
+        }
+        function print_nameserver() {
+            print "  nameserver:"
+            print "    - 223.5.5.5"
+            print "    - 119.29.29.29"
+            print "    - 1.1.1.1"
+            print "    - 8.8.8.8"
+        }
+        function print_fallback() {
+            print "  fallback:"
+            print "    - 1.1.1.1"
+            print "    - 8.8.8.8"
+        }
+        {
+            if (skip_block == 1) {
+                if ($0 ~ /^[[:space:]][[:space:]][[:space:]][[:space:]]/ || $0 ~ /^[[:space:]]*$/) {
+                    next
+                }
+                skip_block = 0
+            }
+
+            if ($0 ~ /^[[:space:]]*dns[[:space:]]*:/) {
+                in_dns = 1
+                print
+                next
+            }
+
+            if (in_dns == 1 && $0 ~ /^[^[:space:]][^:]*:/) {
+                in_dns = 0
+            }
+
+            if (in_dns == 1 && $0 ~ /^[[:space:]][[:space:]]default-nameserver[[:space:]]*:/) {
+                print_default_nameserver()
+                skip_block = 1
+                next
+            }
+
+            if (in_dns == 1 && $0 ~ /^[[:space:]][[:space:]]nameserver[[:space:]]*:/) {
+                print_nameserver()
+                skip_block = 1
+                next
+            }
+
+            if (in_dns == 1 && $0 ~ /^[[:space:]][[:space:]]fallback[[:space:]]*:/) {
+                print_fallback()
+                skip_block = 1
+                next
+            }
+
+            print
+        }
+    ' "${CONFIG_FILE}" > "${tmp_file}" && mv "${tmp_file}" "${CONFIG_FILE}"
+}
+
+migrate_subscription_config() {
+    local applied_mode
+    local subscription_url
+    local normalized_url
+    local subscription_host
+    local changed="false"
+    local status
+
+    [ -f "${CONFIG_FILE}" ] || return 0
+    applied_mode="$(read_first_line "${WIZARD_DIR}/configured_by_install_wizard")"
+    [ "${applied_mode}" = "subscription" ] || return 0
+
+    replace_generated_mixed_port
+    status=$?
+    if [ "${status}" -eq 0 ]; then
+        changed="true"
+    elif [ "${status}" -ne 2 ]; then
+        return 1
+    fi
+
+    migrate_bootstrap_dns
+    status=$?
+    if [ "${status}" -eq 0 ]; then
+        changed="true"
+    elif [ "${status}" -ne 2 ]; then
+        return 1
+    fi
+
+    if ! subscription_provider_has_proxy; then
+        add_subscription_provider_direct_proxy || return 1
+        changed="true"
+    fi
+
+    disable_subscription_provider_health_check
+    status=$?
+    if [ "${status}" -eq 0 ]; then
+        changed="true"
+    elif [ "${status}" -ne 2 ]; then
+        return 1
+    fi
+
+    subscription_url="$(get_wizard_value "wizard_subscription_url" "${WIZARD_SUBSCRIPTION_FILE}" "${FALLBACK_WIZARD_SUBSCRIPTION_FILE}")"
+    normalized_url="$(normalize_config_url "${subscription_url}" 2>/dev/null || true)"
+    if [ -z "${normalized_url}" ]; then
+        subscription_url="$(get_subscription_provider_url | tr -d '\r')"
+        normalized_url="$(normalize_config_url "${subscription_url}" 2>/dev/null || true)"
+    fi
+    if [ -n "${normalized_url}" ]; then
+        subscription_host="$(extract_http_host "${normalized_url}" 2>/dev/null || true)"
+        if is_valid_domain_rule_host "${subscription_host}" && ! subscription_domain_direct_rule_exists "${subscription_host}"; then
+            add_subscription_domain_direct_rule "${subscription_host}" || return 1
+            changed="true"
+        fi
+    fi
+
+    if [ "${changed}" = "true" ]; then
+        log_msg "subscription config migrated for provider direct download and disabled startup health checks"
+    fi
+}
+
+looks_like_mihomo_config() {
+    local file="$1"
+
+    [ -s "${file}" ] || return 1
+    LC_ALL=C grep -Eq '^[[:space:]]*(mixed-port|port|proxies|proxy-providers|proxy-groups|rules)[[:space:]]*:' "${file}"
+}
+
+download_url_to_file() {
+    local url="$1"
+    local dest="$2"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl --fail --location --silent --show-error --connect-timeout 10 --max-time 45 -o "${dest}" "${url}" >> "${LOG_FILE}" 2>&1
+        return $?
+    fi
+
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -T 45 -O "${dest}" "${url}" >> "${LOG_FILE}" 2>&1
+        return $?
+    fi
+
+    log_msg "neither curl nor wget is available for config URL download"
+    return 1
+}
+
+ensure_config_runtime_settings() {
+    local tmp_file="${CONFIG_FILE}.runtime"
+
+    awk '
+        BEGIN {
+            external_controller = 0
+            external_ui = 0
+            geo_auto_update = 0
+        }
+        /^[[:space:]]*external-controller[[:space:]]*:/ {
+            print "external-controller: 0.0.0.0:9090"
+            external_controller = 1
+            next
+        }
+        /^[[:space:]]*external-ui[[:space:]]*:/ {
+            print "external-ui: dashboard"
+            external_ui = 1
+            next
+        }
+        /^[[:space:]]*external-ui-name[[:space:]]*:/ {
+            next
+        }
+        /^[[:space:]]*external-ui-url[[:space:]]*:/ {
+            next
+        }
+        /^[[:space:]]*geo-auto-update[[:space:]]*:/ {
+            print "geo-auto-update: false"
+            geo_auto_update = 1
+            next
+        }
+        { print }
+        END {
+            if (external_controller == 0) {
+                print "external-controller: 0.0.0.0:9090"
+            }
+            if (external_ui == 0) {
+                print "external-ui: dashboard"
+            }
+            if (geo_auto_update == 0) {
+                print "geo-auto-update: false"
+            }
+        }
+    ' "${CONFIG_FILE}" > "${tmp_file}" && mv "${tmp_file}" "${CONFIG_FILE}"
+}
+
+download_wizard_config() {
+    local config_url="$1"
+    local tmp_file="${CONFIG_FILE}.download"
+
+    rm -f "${tmp_file}"
+    if ! download_url_to_file "${config_url}" "${tmp_file}"; then
+        rm -f "${tmp_file}"
+        return 1
+    fi
+
+    if ! looks_like_mihomo_config "${tmp_file}"; then
+        log_msg "downloaded config URL does not look like a mihomo YAML config"
+        rm -f "${tmp_file}"
+        return 1
+    fi
+
+    mv "${tmp_file}" "${CONFIG_FILE}" || return 1
+    ensure_config_runtime_settings || return 1
+    mark_wizard_config_applied "config_url" || return 1
+    log_msg "initial config downloaded from install wizard config URL"
+}
+
+create_initial_config() {
+    local mode
+    local subscription_url
+    local config_url
+    local normalized_config_url
+    local config_url_ready="false"
+
+    mode="$(get_wizard_value "wizard_config_mode" "${WIZARD_MODE_FILE}" "${FALLBACK_WIZARD_MODE_FILE}")"
+    subscription_url="$(get_wizard_value "wizard_subscription_url" "${WIZARD_SUBSCRIPTION_FILE}" "${FALLBACK_WIZARD_SUBSCRIPTION_FILE}")"
+    config_url="$(get_wizard_value "wizard_config_url" "${WIZARD_CONFIG_URL_FILE}" "${FALLBACK_WIZARD_CONFIG_URL_FILE}")"
+
+    if [ -n "${config_url}" ]; then
+        if normalized_config_url="$(normalize_config_url "${config_url}")"; then
+            config_url="${normalized_config_url}"
+            mode="config_url"
+            config_url_ready="true"
+        else
+            log_msg "install wizard config URL is missing or invalid"
+        fi
+    fi
+
+    if [ "${config_url_ready}" != "true" ] && [ -n "${subscription_url}" ]; then
+        case "${subscription_url}" in
+        clash://install-config\?*)
+            if normalized_config_url="$(normalize_config_url "${subscription_url}")"; then
+                subscription_url="${normalized_config_url}"
+                mode="subscription"
+            else
+                log_msg "install wizard clash install-config URL is missing or invalid"
+            fi
+            ;;
+        *)
+            if is_valid_http_url "${subscription_url}"; then
+                mode="subscription"
+            else
+                log_msg "install wizard subscription URL is missing or invalid"
+            fi
+            ;;
+        esac
+    fi
+
+    case "${mode}" in
+    subscription)
+        if is_valid_http_url "${subscription_url}" && write_subscription_config "${subscription_url}"; then
+            return 0
+        fi
+        log_msg "install wizard selected subscription mode but subscription URL is missing or invalid"
+        ;;
+    config_url)
+        if is_valid_http_url "${config_url}" && download_wizard_config "${config_url}"; then
+            return 0
+        fi
+        log_msg "install wizard selected config URL mode but config URL could not be used"
+        ;;
+    manual|"")
+        log_msg "install wizard selected manual mode or no wizard values were provided"
+        ;;
+    *)
+        log_msg "unknown install wizard mode: ${mode}"
+        ;;
+    esac
+
+    cp "${TEMPLATE_FILE}" "${CONFIG_FILE}" || return 1
+    log_msg "initial config created from bundled default template"
+}
+
+prepare_dirs() {
+    mkdir -p "${APP_ETC}" "${APP_VAR}" "${APP_SHARE}" "${CONFIG_DIR}" "${CONFIG_DIR}/providers" "${LOG_DIR}" "${RUN_DIR}" "${BIN_DIR}" "${WIZARD_DIR}" "${FALLBACK_WIZARD_DIR}"
+    if [ ! -f "${CONFIG_FILE}" ]; then
+        create_initial_config || return 1
+    fi
+    migrate_subscription_config || return 1
+    ensure_config_runtime_settings || return 1
+    prepare_secret || return 1
+    prepare_geodata || return 1
+    prepare_dashboard || return 1
+    if [ ! -e "${APP_ETC}/config.yaml" ]; then
+        ln -s "${CONFIG_FILE}" "${APP_ETC}/config.yaml" 2>/dev/null || cp "${CONFIG_FILE}" "${APP_ETC}/config.yaml"
+    fi
+}
+
+get_config_secret() {
+    awk '
+        /^[[:space:]]*secret[[:space:]]*:/ {
+            sub(/^[[:space:]]*secret[[:space:]]*:[[:space:]]*/, "")
+            sub(/[[:space:]]*#.*/, "")
+            gsub(/^"/, "")
+            gsub(/"$/, "")
+            gsub(/^'\''/, "")
+            gsub(/'\''$/, "")
+            print
+            exit
+        }
+    ' "${CONFIG_FILE}"
+}
+
+set_config_secret() {
+    local secret="$1"
+    local tmp_file="${CONFIG_FILE}.tmp"
+
+    awk -v secret="${secret}" '
+        BEGIN { updated = 0 }
+        /^[[:space:]]*secret[[:space:]]*:/ && updated == 0 {
+            print "secret: \"" secret "\""
+            updated = 1
+            next
+        }
+        { print }
+        END {
+            if (updated == 0) {
+                print "secret: \"" secret "\""
+            }
+        }
+    ' "${CONFIG_FILE}" > "${tmp_file}" && mv "${tmp_file}" "${CONFIG_FILE}"
+}
+
+generate_secret() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32 2>/dev/null && return 0
+    fi
+
+    if [ -r "/proc/sys/kernel/random/uuid" ]; then
+        {
+            cat /proc/sys/kernel/random/uuid
+            cat /proc/sys/kernel/random/uuid
+        } | tr -d '-\n'
+        return 0
+    fi
+
+    dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'
+}
+
+prepare_secret() {
+    local secret
+    local config_secret
+    local should_update_config="true"
+
+    config_secret="$(get_config_secret | tr -d '\r\n')"
+    secret="${config_secret}"
+    if [ -n "${secret}" ]; then
+        should_update_config="false"
+    fi
+
+    if [ -z "${secret}" ] && [ -s "${SECRET_FILE}" ]; then
+        secret="$(head -n 1 "${SECRET_FILE}" | tr -d '\r\n')"
+    fi
+
+    if [ -z "${secret}" ]; then
+        secret="$(generate_secret | tr -d '\r\n')"
+    fi
+
+    if [ -z "${secret}" ]; then
+        log_msg "failed to generate controller secret"
+        return 1
+    fi
+
+    printf '%s\n' "${secret}" > "${SECRET_FILE}" || return 1
+    chmod 600 "${SECRET_FILE}" 2>/dev/null || true
+    if [ "${should_update_config}" = "true" ]; then
+        set_config_secret "${secret}" || return 1
+    fi
+    log_msg "controller secret prepared"
+}
+
+prepare_dashboard() {
+    local secret
+    local escaped_secret
+
+    if [ ! -d "${DASHBOARD_SOURCE_DIR}" ]; then
+        log_msg "dashboard source directory does not exist: ${DASHBOARD_SOURCE_DIR}"
+        return 1
+    fi
+
+    case "${RUNTIME_DASHBOARD_DIR}" in
+    "${APP_VAR}/dashboard")
+        rm -rf "${RUNTIME_DASHBOARD_DIR}"
+        ;;
+    *)
+        log_msg "refuse to remove unexpected dashboard directory: ${RUNTIME_DASHBOARD_DIR}"
+        return 1
+        ;;
+    esac
+
+    mkdir -p "${RUNTIME_DASHBOARD_DIR}" || return 1
+    cp -R "${DASHBOARD_SOURCE_DIR}/." "${RUNTIME_DASHBOARD_DIR}/" >> "${LOG_FILE}" 2>&1 || return 1
+
+    secret="$(head -n 1 "${SECRET_FILE}" | tr -d '\r\n')"
+    escaped_secret="$(printf '%s' "${secret}" | awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); printf "%s", $0 }')"
+    awk -v secret="${escaped_secret}" '
+        {
+            needle = "secret: \"\","
+            pos = index($0, needle)
+            if (pos > 0 && done == 0) {
+                print substr($0, 1, pos - 1) "secret: \"" secret "\"," substr($0, pos + length(needle))
+                done = 1
+                next
+            }
+            print
+        }
+    ' "${DASHBOARD_SOURCE_DIR}/config.js" > "${RUNTIME_DASHBOARD_DIR}/config.js" || return 1
+    chmod 644 "${RUNTIME_DASHBOARD_DIR}/config.js" 2>/dev/null || true
+    log_msg "runtime dashboard prepared"
+}
+
+copy_geodata_file() {
+    local src="$1"
+    local dest="$2"
+    if [ -f "${src}" ]; then
+        cp -f "${src}" "${dest}" >> "${LOG_FILE}" 2>&1 || return 1
+        chmod 644 "${dest}" >> "${LOG_FILE}" 2>&1 || true
+        return 0
+    fi
+    return 0
+}
+
+prepare_geodata() {
+    if [ ! -d "${GEODATA_DIR}" ]; then
+        log_msg "embedded geodata directory does not exist: ${GEODATA_DIR}"
+        return 0
+    fi
+
+    copy_geodata_file "${GEODATA_DIR}/country.mmdb" "${CONFIG_DIR}/country.mmdb" || return 1
+    copy_geodata_file "${GEODATA_DIR}/country.mmdb" "${CONFIG_DIR}/Country.mmdb" || return 1
+    copy_geodata_file "${GEODATA_DIR}/geoip.metadb" "${CONFIG_DIR}/geoip.metadb" || return 1
+    copy_geodata_file "${GEODATA_DIR}/geoip.dat" "${CONFIG_DIR}/geoip.dat" || return 1
+    copy_geodata_file "${GEODATA_DIR}/geosite.dat" "${CONFIG_DIR}/geosite.dat" || return 1
+    log_msg "embedded geodata prepared"
+}
+
+prepare_binary() {
+    if [ ! -f "${SOURCE_BIN}" ]; then
+        log_msg "source binary does not exist: ${SOURCE_BIN}"
+        return 1
+    fi
+
+    cp "${SOURCE_BIN}" "${BIN}" >> "${LOG_FILE}" 2>&1 || return 1
+    chmod 755 "${BIN}" >> "${LOG_FILE}" 2>&1 || return 1
+    return 0
+}
+
+is_running_pid() {
+    local pid="$1"
+    [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
+}
+
+status_process() {
+    if [ -f "${PID_FILE}" ]; then
+        local pid
+        pid="$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')"
+        if is_running_pid "${pid}"; then
+            return 0
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    return 3
+}
+
+start_process() {
+    if status_process; then
+        log_msg "${APP_NAME} is already running"
+        return 0
+    fi
+
+    if ! prepare_dirs; then
+        log_msg "failed to prepare runtime directories"
+        write_temp_log
+        return 1
+    fi
+    if ! prepare_binary; then
+        log_msg "failed to prepare runtime binary from ${SOURCE_BIN} to ${BIN}"
+        write_temp_log
+        return 1
+    fi
+
+    if [ ! -x "${BIN}" ]; then
+        log_msg "binary is not executable: ${BIN}"
+        write_temp_log
+        return 1
+    fi
+
+    log_msg "starting ${APP_NAME}"
+    log_msg "config=${CONFIG_FILE}"
+    log_msg "dashboard=${DASHBOARD_DIR}"
+    "${BIN}" -d "${CONFIG_DIR}" -f "${CONFIG_FILE}" -ext-ui "${DASHBOARD_DIR}" >> "${LOG_FILE}" 2>&1 &
+    echo "$!" > "${PID_FILE}"
+    sleep 2
+
+    if status_process; then
+        return 0
+    fi
+
+    log_msg "failed to start ${APP_NAME}"
+    write_temp_log
+    return 1
+}
+
+stop_process() {
+    if [ ! -f "${PID_FILE}" ]; then
+        return 0
+    fi
+
+    local pid
+    pid="$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')"
+    if ! is_running_pid "${pid}"; then
+        rm -f "${PID_FILE}"
+        return 0
+    fi
+
+    log_msg "stopping ${APP_NAME} pid=${pid}"
+    kill -TERM "${pid}" >> "${LOG_FILE}" 2>&1 || true
+
+    local count=0
+    while is_running_pid "${pid}" && [ "${count}" -lt 10 ]; do
+        sleep 1
+        count=$((count + 1))
+    done
+
+    if is_running_pid "${pid}"; then
+        kill -KILL "${pid}" >> "${LOG_FILE}" 2>&1 || true
+    fi
+    rm -f "${PID_FILE}"
+    return 0
+}
+
+case "$1" in
+start)
+    start_process
+    ;;
+stop)
+    stop_process
+    ;;
+status)
+    status_process
+    ;;
+*)
+    exit 1
+    ;;
+esac

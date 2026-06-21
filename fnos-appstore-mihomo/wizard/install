@@ -1,0 +1,43 @@
+[
+  {
+    "stepTitle": "首次配置",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "下面两个输入框二选一填写即可；大多数用户只需要填写第一个“订阅 / 导入链接”。都留空则安装后使用默认配置，后续可在 Web 面板或应用文件目录中手动维护。"
+      },
+      {
+        "type": "text",
+        "field": "wizard_subscription_url",
+        "label": "订阅 / 导入链接",
+        "initValue": "",
+        "rules": [
+          {
+            "pattern": "^(|https?://.+|clash://install-config\\?.+)$",
+            "message": "订阅 / 导入链接必须以 http://、https:// 或 clash://install-config?url= 开头"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_config_url",
+        "label": "完整 YAML 配置 URL",
+        "initValue": "",
+        "rules": [
+          {
+            "pattern": "^(|https?://.+)$",
+            "message": "完整 YAML 配置 URL 必须以 http:// 或 https:// 开头；clash://install-config 链接请填上面的订阅 / 导入链接"
+          }
+        ]
+      },
+      {
+        "type": "tips",
+        "helpText": "普通订阅地址和小猫咪复制出来的 clash://install-config?url=...&name=... 都填第一个输入框。只有你明确有一份可直接作为 mihomo config.yaml 使用的完整 YAML 文件时，才填第二个输入框。两个都填写时优先使用完整 YAML 配置。"
+      },
+      {
+        "type": "tips",
+        "helpText": "配置文件和日志会写入飞牛“应用文件”目录；包内 geodata 为内置文件，后续更新需要维护者重新打包。"
+      }
+    ]
+  }
+]

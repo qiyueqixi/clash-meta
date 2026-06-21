@@ -1,0 +1,190 @@
+#!/bin/bash
+
+APP_NAME="clash.meta"
+APP_ROOT="/var/apps/${APP_NAME}"
+APP_VAR="${TRIM_PKGVAR:-/var/apps/${APP_NAME}/var}"
+
+get_share_dir() {
+    if [ -n "${TRIM_DATA_SHARE_PATHS}" ]; then
+        echo "${TRIM_DATA_SHARE_PATHS}" | tr ':' '\n' | while read -r item; do
+            [ -n "${item}" ] && echo "${item}" && break
+        done
+        return
+    fi
+
+    if [ -d "/var/apps/${APP_NAME}/shares/${APP_NAME}" ]; then
+        echo "/var/apps/${APP_NAME}/shares/${APP_NAME}"
+        return
+    fi
+
+    echo "${APP_VAR}/share"
+}
+
+APP_SHARE="$(get_share_dir)"
+CONFIG_DIR="${APP_SHARE}/config"
+WIZARD_DIR="${CONFIG_DIR}/wizard"
+FALLBACK_WIZARD_DIR="${APP_VAR}/wizard"
+LOG_DIR="${APP_SHARE}/logs"
+LOG_FILE="${LOG_DIR}/mihomo.log"
+
+log_msg() {
+    mkdir -p "${LOG_DIR}"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" >> "${LOG_FILE}"
+}
+
+trim_value() {
+    printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+get_wizard_env_value() {
+    local key="$1"
+    local upper_key
+    upper_key="$(printf '%s' "${key}" | tr '[:lower:]' '[:upper:]')"
+    eval "printf '%s' \"\${${key}:-\${${upper_key}:-}}\""
+}
+
+write_value_file() {
+    local value="$1"
+    local file="$2"
+
+    if [ -n "${value}" ]; then
+        printf '%s\n' "${value}" > "${file}" || return 1
+        chmod 644 "${file}" 2>/dev/null || true
+    else
+        rm -f "${file}" 2>/dev/null || true
+    fi
+}
+
+is_valid_http_url() {
+    local value="$1"
+
+    case "${value}" in
+    http://*|https://*)
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+
+    if [ "${#value}" -gt 4096 ]; then
+        return 1
+    fi
+
+    if printf '%s' "${value}" | LC_ALL=C grep -q '[[:space:]"\\]'; then
+        return 1
+    fi
+
+    return 0
+}
+
+decode_clash_url_value() {
+    printf '%s' "$1" | sed \
+        -e 's/%2[Bb]/+/g' \
+        -e 's/%3[Aa]/:/g' -e 's/%2[Ff]/\//g' \
+        -e 's/%3[Ff]/?/g' -e 's/%26/\&/g' \
+        -e 's/%3[Dd]/=/g' -e 's/%25/%/g'
+}
+
+extract_clash_install_config_url() {
+    local value="$1"
+    local query
+    local encoded_url
+
+    case "${value}" in
+    clash://install-config\?*)
+        query="${value#clash://install-config?}"
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+
+    encoded_url="$(printf '%s\n' "${query}" | tr '&' '\n' | sed -n 's/^url=//p' | head -n 1)"
+    if [ -z "${encoded_url}" ]; then
+        return 1
+    fi
+
+    decode_clash_url_value "${encoded_url}"
+}
+
+normalize_config_url() {
+    local value="$1"
+    local extracted
+
+    case "${value}" in
+    clash://install-config\?*)
+        extracted="$(extract_clash_install_config_url "${value}")" || return 1
+        value="$(trim_value "${extracted}")"
+        ;;
+    esac
+
+    is_valid_http_url "${value}" || return 1
+    printf '%s' "${value}"
+}
+
+mkdir -p "${WIZARD_DIR}" "${FALLBACK_WIZARD_DIR}" "${LOG_DIR}" || exit 1
+
+legacy_mode="$(trim_value "$(get_wizard_env_value "wizard_config_mode")")"
+subscription_url="$(trim_value "$(get_wizard_env_value "wizard_subscription_url")")"
+config_url="$(trim_value "$(get_wizard_env_value "wizard_config_url")")"
+
+mode="manual"
+normalized_subscription_url=""
+normalized_config_url=""
+
+if [ -n "${config_url}" ]; then
+    if normalized_config_url="$(normalize_config_url "${config_url}")"; then
+        mode="config_url"
+    else
+        log_msg "install wizard config URL is invalid, ignoring it"
+    fi
+fi
+
+if [ "${mode}" = "manual" ] && [ -n "${subscription_url}" ]; then
+    case "${subscription_url}" in
+    clash://install-config\?*)
+        if normalized_subscription_url="$(normalize_config_url "${subscription_url}")"; then
+            mode="subscription"
+        else
+            log_msg "install wizard clash install-config URL is invalid, ignoring it"
+        fi
+        ;;
+    *)
+        if is_valid_http_url "${subscription_url}"; then
+            normalized_subscription_url="${subscription_url}"
+            mode="subscription"
+        else
+            log_msg "install wizard subscription URL is invalid, ignoring it"
+        fi
+        ;;
+    esac
+fi
+
+case "${legacy_mode}" in
+config_url)
+    if [ -n "${normalized_config_url}" ]; then
+        mode="config_url"
+    fi
+    ;;
+subscription)
+    if [ -n "${normalized_subscription_url}" ]; then
+        mode="subscription"
+    fi
+    ;;
+manual|"")
+    ;;
+*)
+    log_msg "unknown legacy install wizard mode ignored: ${legacy_mode}"
+    ;;
+esac
+
+write_value_file "${mode}" "${WIZARD_DIR}/mode" || exit 1
+write_value_file "${normalized_subscription_url}" "${WIZARD_DIR}/subscription.url" || exit 1
+write_value_file "${normalized_config_url}" "${WIZARD_DIR}/config.url" || exit 1
+write_value_file "${mode}" "${FALLBACK_WIZARD_DIR}/mode" || exit 1
+write_value_file "${normalized_subscription_url}" "${FALLBACK_WIZARD_DIR}/subscription.url" || exit 1
+write_value_file "${normalized_config_url}" "${FALLBACK_WIZARD_DIR}/config.url" || exit 1
+
+log_msg "install wizard values saved: mode=${mode}"
+
+exit 0

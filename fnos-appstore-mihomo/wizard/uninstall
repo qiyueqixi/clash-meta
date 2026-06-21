@@ -1,0 +1,41 @@
+[
+  {
+    "stepTitle": "卸载数据处理",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "请选择卸载 Clash.Meta 时如何处理应用文件目录中的配置、订阅和运行数据。默认保留全部数据，方便以后重新安装后继续使用。"
+      },
+      {
+        "type": "radio",
+        "field": "wizard_uninstall_data_action",
+        "label": "数据处理方式",
+        "initValue": "keep_all",
+        "options": [
+          {
+            "label": "保留全部用户数据（推荐）",
+            "value": "keep_all"
+          },
+          {
+            "label": "删除其他数据，保留用户配置与订阅",
+            "value": "delete_other_data_keep_config_subscription"
+          },
+          {
+            "label": "删除全部应用数据",
+            "value": "delete_all"
+          }
+        ],
+        "rules": [
+          {
+            "required": true,
+            "message": "请选择卸载时的数据处理方式"
+          }
+        ]
+      },
+      {
+        "type": "tips",
+        "helpText": "“删除其他数据”会保留 config.yaml、secret、订阅 provider 和安装向导保存的订阅/配置 URL，只清理运行缓存、临时文件和旧日志；“删除全部应用数据”会删除 Clash.Meta 的整个应用文件目录。"
+      }
+    ]
+  }
+]
