@@ -571,7 +571,7 @@ ${directRule}  - MATCH,PROXY
       return
     }
     submitButton.disabled = loading
-    submitButton.textContent = loading ? "正在加载..." : "加载配置"
+    submitButton.textContent = loading ? "正在加载..." : "应用配置"
   }
 
   function getErrorMessage(error) {
@@ -599,14 +599,14 @@ ${directRule}  - MATCH,PROXY
     overlay.innerHTML = [
       '<div class="clash-meta-subscription-tool__panel">',
       '<form class="clash-meta-subscription-tool__body">',
-      '<h2 id="clash-meta-subscription-tool-title" class="clash-meta-subscription-tool__title">导入配置</h2>',
-      '<p class="clash-meta-subscription-tool__desc">支持 http(s) 订阅和 clash://install-config 链接。这里会直接让 mihomo 运行时加载配置，不再进入 MetaCubeXD 的空配置文件页。</p>',
+      '<h2 id="clash-meta-subscription-tool-title" class="clash-meta-subscription-tool__title">配置订阅</h2>',
+      '<p class="clash-meta-subscription-tool__desc">支持 http(s) 订阅和 clash://install-config 链接。这里会生成并加载当前运行时配置，不进入 MetaCubeXD 的空配置文件页；此操作不会写回飞牛应用文件里的 config.yaml。</p>',
       '<label class="clash-meta-subscription-tool__label" for="clash-meta-subscription-tool-url">订阅 / 导入链接</label>',
       '<input id="clash-meta-subscription-tool-url" class="clash-meta-subscription-tool__input" type="text" inputmode="url" autocomplete="off" placeholder="https://... 或 clash://install-config?url=..." />',
       '<p class="clash-meta-subscription-tool__error" aria-live="polite"></p>',
       '<div class="clash-meta-subscription-tool__actions">',
       '<button type="button" class="clash-meta-subscription-tool__button clash-meta-subscription-tool__button--secondary" data-action="cancel">取消</button>',
-      '<button type="submit" class="clash-meta-subscription-tool__button clash-meta-subscription-tool__button--primary">加载配置</button>',
+      '<button type="submit" class="clash-meta-subscription-tool__button clash-meta-subscription-tool__button--primary">应用配置</button>',
       "</div>",
       "</form>",
       "</div>",
@@ -656,10 +656,10 @@ ${directRule}  - MATCH,PROXY
         clearLegacySubscriptionState()
         overlay.remove()
         routeToProxies()
-        showImportHint("运行时配置已加载。若要永久保存到飞牛应用目录，下次请在安装向导填写订阅，或手动更新 config.yaml。")
+        showImportHint("运行时配置已加载。此按钮不会写回 config.yaml；若要永久保存，请在安装向导填写订阅，或手动更新应用文件里的 config.yaml 后重启。")
       } catch (applyError) {
         error.textContent = getErrorMessage(applyError)
-        showImportHint("配置没有及时加载完成，按钮已恢复。请检查 NAS 是否能直连访问订阅地址，或使用安装向导 / config.yaml 写入持久配置。", "error")
+        showImportHint("运行时配置没有及时加载完成，按钮已恢复。请检查 NAS 是否能直连访问订阅地址，或使用安装向导 / config.yaml 写入持久配置。", "error")
         setSubmitState(submitButton, false)
       }
     })
@@ -676,8 +676,8 @@ ${directRule}  - MATCH,PROXY
     button.id = "clash-meta-subscription-tool-trigger"
     button.className = "clash-meta-subscription-tool__trigger"
     button.type = "button"
-    button.textContent = "导入"
-    button.setAttribute("aria-label", "导入配置")
+    button.textContent = "配置"
+    button.setAttribute("aria-label", "配置订阅")
     button.addEventListener("click", openConfigImportDialog)
     document.body.appendChild(button)
   }

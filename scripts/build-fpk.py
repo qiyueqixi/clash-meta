@@ -262,6 +262,8 @@ def validate_entry() -> None:
         "applyRuntimeConfig(",
         "fetchWithTimeout(",
         "/configs?force=true",
+        "配置订阅",
+        "应用配置",
         "加载配置超时",
         "运行时配置已加载",
     ):
@@ -286,6 +288,8 @@ def validate_entry() -> None:
         "SECRET_FILE=",
         "prepare_secret()",
         "generate_secret()",
+        "is_placeholder_secret()",
+        "ignored placeholder controller secret",
         "prepare_dashboard()",
         "prepare_geodata()",
         "create_initial_config()",

@@ -1,5 +1,5 @@
 appname=clash.meta
-version=1.19.27-27
+version=1.19.27-29
 display_name=Clash.Meta
 desc=Clash.Meta mihomo core with built-in MetaCubeXD web dashboard.
 platform=x86
@@ -14,4 +14,4 @@ desktop_applaunchname=clash.meta.Application
 service_port=9090
 checkport=true
 disable_authorization_path=true
-changelog=Add timeout recovery for embedded runtime import and disable subscription health checks by default.
+changelog=Ignore placeholder controller secrets and regenerate a real secret on startup.

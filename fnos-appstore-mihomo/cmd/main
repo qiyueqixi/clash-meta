@@ -825,19 +825,52 @@ generate_secret() {
     dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'
 }
 
+is_placeholder_secret() {
+    local value
+
+    value="$(trim_value "$1")"
+    case "${value}" in
+    ""|\
+    "保留你原来的 secret"|\
+    "保留你原来的secret"|\
+    "保留原来的 secret"|\
+    "保留原来的secret"|\
+    "保留你原来的密钥"|\
+    "your-secret"|\
+    "your secret"|\
+    "change-me"|\
+    "changeme"|\
+    "CHANGE_ME"|\
+    "replace-me"|\
+    "REPLACE_ME")
+        return 0
+        ;;
+    esac
+
+    return 1
+}
+
 prepare_secret() {
     local secret
     local config_secret
+    local file_secret
     local should_update_config="true"
 
     config_secret="$(get_config_secret | tr -d '\r\n')"
-    secret="${config_secret}"
-    if [ -n "${secret}" ]; then
+    if [ -n "${config_secret}" ] && ! is_placeholder_secret "${config_secret}"; then
+        secret="${config_secret}"
         should_update_config="false"
+    elif [ -n "${config_secret}" ]; then
+        log_msg "ignored placeholder controller secret in config.yaml"
     fi
 
     if [ -z "${secret}" ] && [ -s "${SECRET_FILE}" ]; then
-        secret="$(head -n 1 "${SECRET_FILE}" | tr -d '\r\n')"
+        file_secret="$(head -n 1 "${SECRET_FILE}" | tr -d '\r\n')"
+        if ! is_placeholder_secret "${file_secret}"; then
+            secret="${file_secret}"
+        else
+            log_msg "ignored placeholder controller secret in secret file"
+        fi
     fi
 
     if [ -z "${secret}" ]; then

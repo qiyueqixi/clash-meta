@@ -38,7 +38,7 @@ D:\clash-meta
 
 ```text
 appname=clash.meta
-version=1.19.27-27
+version=1.19.27-29
 platform=x86
 desktop_uidir=ui
 desktop_applaunchname=clash.meta.Application
@@ -79,6 +79,8 @@ disable_authorization_path=true
 1.19.27-25
 1.19.27-26
 1.19.27-27
+1.19.27-28
+1.19.27-29
 1.20.0-1
 ```
 
@@ -208,6 +210,7 @@ cmd/main status
 - 如果用户 `config.yaml` 已经有非空 `secret`，沿用它，不重写用户配置。
 - 如果 `config.yaml` 是空密钥，但 `<应用文件>/clash.meta/config/secret` 已存在，复用该文件。
 - 如果两者都为空，首次启动生成随机 64 位十六进制 secret。
+- 从 `1.19.27-29` 开始，如果 `config.yaml` 或 `secret` 文件里是 `保留你原来的 secret`、`change-me`、`REPLACE_ME` 这类明显占位符，会忽略该值并重新生成真实 secret。
 - secret 文件权限尽量设置为 `0600`。
 - 每次启动都会把安装目录的 `dashboard/` 复制到 `${TRIM_PKGVAR}/dashboard`，再把 secret 注入运行时 `config.js`。
 
@@ -332,17 +335,19 @@ MetaCubeXD 默认后端配置:
 
 这样从 `http://<飞牛IP>:9090/ui/` 打开面板时，会默认连接同一个 `9090` 控制端口，并自动注册 `local-mihomo` 本地端点。不要只设置 `defaultBackendURL`，它在 MetaCubeXD 里只是默认候选地址，不一定会保存和选中端点。
 
-从 `1.19.27-21` 开始，`config.js` 不再自动弹出订阅配置，避免和原生安装向导重复。Web 面板保留一个手动触发的右下角导入按钮:
+从 `1.19.27-21` 开始，`config.js` 不再自动弹出订阅配置，避免和原生安装向导重复。Web 面板保留一个手动触发的右下角配置按钮:
 
 - 从 `1.19.27-26` 开始按钮文案为 `导入`，这是本包额外注入的按钮，不是 MetaCubeXD 原生按钮。
 - 从 `1.19.27-27` 开始，`PUT /configs?force=true` 和后台 provider 刷新都走 `fetchWithTimeout()`；运行时导入配置默认关闭 provider `health-check`，避免导入后立刻测速造成长时间等待。
+- 从 `1.19.27-28` 开始按钮文案改为 `配置`，弹窗标题改为 `配置订阅`，提交按钮改为 `应用配置`。功能仍是运行时加载订阅配置，不写回 `config.yaml`。
 - `clashMetaConfigDraftUrl` 用来保留弹窗草稿。
 - 兼容清理旧版 `clashMetaSubscriptionPendingUrl` / `clashMetaSubscriptionDraftUrl`，避免升级后继续触发旧的 `#/profiles` 填表流程。
 - 支持普通 `http(s)` 订阅和 `clash://install-config?url=...&name=...` 导入链接。
 - 提交后前端生成一份最小 mihomo 订阅配置，调用 `PUT /configs?force=true` 加载运行时配置，然后跳转到 `#/proxies`。
 - 如果控制接口 30 秒内没有返回，弹窗会显示超时错误并恢复按钮；此时可能是 mihomo 正在后台拉订阅，也可能是 NAS 无法直连订阅域名。
 - 这段逻辑不承诺写回 `<应用文件>/clash.meta/config/config.yaml`。持久配置仍以原生安装向导或手动编辑 `config.yaml` 为准。
-- `scripts/build-fpk.py` 会校验 `clashMetaConfigDraftUrl`、`clearLegacySubscriptionState()`、`installConfigImportButton()`、`normalizeSubscriptionInput()`、`buildSubscriptionConfig()`、`applyRuntimeConfig()`、`fetchWithTimeout()`、`/configs?force=true`、`加载配置超时` 和 `运行时配置已加载`，并禁止恢复 `routeToProfiles()`、`openProfileImportUI()`、`prefillSubscriptionURL()` 等旧逻辑。
+- 纯静态 MetaCubeXD 页面没有飞牛应用文件目录写入权限。除非以后新增受保护的本地 helper 服务或改成 helper 代理 dashboard，否则不要把页面按钮描述成“永久保存”。
+- `scripts/build-fpk.py` 会校验 `clashMetaConfigDraftUrl`、`clearLegacySubscriptionState()`、`installConfigImportButton()`、`normalizeSubscriptionInput()`、`buildSubscriptionConfig()`、`applyRuntimeConfig()`、`fetchWithTimeout()`、`/configs?force=true`、`配置订阅`、`应用配置`、`加载配置超时` 和 `运行时配置已加载`，并禁止恢复 `routeToProfiles()`、`openProfileImportUI()`、`prefillSubscriptionURL()` 等旧逻辑。
 
 ## 上游来源
 
@@ -418,7 +423,7 @@ Get-FileHash 'fnos-appstore-mihomo\app\geodata\country.mmdb','fnos-appstore-miho
 fnos-appstore-mihomo/app/dashboard/
 ```
 
-4. 检查 `app/dashboard/config.js`，确保仍然包含默认后端配置、`window.metacubexd.endpoint` / `localStorage` 自举逻辑，以及右下角 `导入` 运行时加载配置逻辑。
+4. 检查 `app/dashboard/config.js`，确保仍然包含默认后端配置、`window.metacubexd.endpoint` / `localStorage` 自举逻辑，以及右下角 `配置` 运行时加载配置逻辑。
 5. 如果图标需要同步，可复制:
 
 ```text
@@ -431,7 +436,7 @@ app/dashboard/pwa-512x512.png -> ICON_256.PNG 和 app/ui/images/icon_256.png
 在 `D:\clash-meta` 执行。当前不要再直接用 Windows 版 `fnpack build` 产出最终包，因为它会丢 Unix 执行权限。正式构建使用:
 
 ```powershell
-python scripts\build-fpk.py --version 1.19.27-27
+python scripts\build-fpk.py --version 1.19.27-29
 ```
 
 脚本会自动:
@@ -446,8 +451,8 @@ python scripts\build-fpk.py --version 1.19.27-27
 - 校验入口图标 `app/ui/images/64.png` 和 `app/ui/images/256.png` 存在
 - 校验内置 `country.mmdb`、`geoip.metadb`、完整版 `geoip.dat` 和完整版 `geosite.dat` 存在且大小合理
 - 校验默认配置使用 `mixed-port: 7899` 和 `geo-auto-update: false`，不包含 `external-ui-name` / `external-ui-url`，DNS bootstrap 不依赖 DoH 域名
-- 校验 `dashboard/config.js` 包含本地 endpoint 自举和右下角运行时导入配置按钮
-- 校验 `cmd/main` 包含 `TRIM_DATA_SHARE_PATHS`、`${TRIM_TEMP_LOGFILE}`、随机 secret、内置 geodata 和运行时 dashboard 逻辑
+- 校验 `dashboard/config.js` 包含本地 endpoint 自举和右下角运行时配置按钮
+- 校验 `cmd/main` 包含 `TRIM_DATA_SHARE_PATHS`、`${TRIM_TEMP_LOGFILE}`、随机 secret、占位符 secret 防呆、内置 geodata 和运行时 dashboard 逻辑
 - 校验 `wizard/install` 包含中文原生安装向导、订阅/导入链接、完整 YAML 配置 URL 字段和 `clash://install-config` 提示
 - 校验 `wizard/uninstall` 包含中文原生卸载向导和三种数据处理方式
 - 校验 `cmd/install_callback` 会保存 `wizard_subscription_url`、`wizard_config_url`，并兼容旧字段 `wizard_config_mode`
@@ -514,7 +519,7 @@ geodata/geosite.dat
 ```powershell
 Remove-Item -Recurse -Force '.tmp\inspect-x86','.tmp\inspect-x86-app' -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path '.tmp\inspect-x86','.tmp\inspect-x86-app' | Out-Null
-tar -xf 'dist\clash.meta_1.19.27-27_x86.fpk' -C '.tmp\inspect-x86'
+tar -xf 'dist\clash.meta_1.19.27-29_x86.fpk' -C '.tmp\inspect-x86'
 tar -xzf '.tmp\inspect-x86\app.tgz' -C '.tmp\inspect-x86-app'
 Get-Content '.tmp\inspect-x86\manifest'
 Get-Content '.tmp\inspect-x86\config\privilege'
@@ -839,25 +844,26 @@ Start Mixed(http+socks) server error: listen tcp :7890: bind: address already in
 - 前端解出真实订阅 URL，生成与安装向导同结构的最小 mihomo 配置，包含 `proxy-providers.subscription`、`proxy: DIRECT`、订阅域名直连规则、`mixed-port: 7899`、`external-ui: dashboard` 和当前 controller `secret`。
 - 前端调用 mihomo 标准控制接口 `PUT /configs?force=true`，请求体为 `{ "path": "", "payload": "<yaml>" }`，成功后跳转 `#/proxies`。
 - 从 `1.19.27-27` 开始，运行时导入里的 `proxy-providers.subscription.health-check.enable` 默认为 `false`，并给 `PUT /configs?force=true` 加 30 秒超时、给后台 provider 刷新加 8 秒超时。
+- 从 `1.19.27-28` 开始，按钮文案改成 `配置`，弹窗标题改成 `配置订阅`。这是同一个运行时配置能力，只是避免用户把它理解成 MetaCubeXD 原生“导入配置文件”或永久写盘。
 
 踩坑:
 
 - 右下角提示和按钮都是本包注入的，不是 MetaCubeXD 原生 UI。用户截图里的“没有进入配置文件页面”和“订阅链接已填入导入页”都来自旧版 `config.js`。
 - 当前包内置的是静态 MetaCubeXD external-ui，MetaCubeXD 的 Profiles 导入组件内部调用 `/api/control/profiles/import`，这不是 mihomo 标准 external-controller API。没有额外控制后端时，页面可能只有“暂无配置文件”空状态，无法真正完成 Profile 导入。
-- `#/config` 页里的“拉取远程配置”对应 MetaCubeXD 自己的 `fetchRemoteConfigAPI`，内部也是先下载 YAML，再 `PUT /configs?force=true`。因此右下角 `导入` 按钮应贴这个标准控制接口，而不是继续找 Profiles 输入框。
+- `#/config` 页里的“拉取远程配置”对应 MetaCubeXD 自己的 `fetchRemoteConfigAPI`，内部也是先下载 YAML，再 `PUT /configs?force=true`。因此右下角 `配置` 按钮应贴这个标准控制接口，而不是继续找 Profiles 输入框。
 - `PUT /configs?force=true` 能让当前运行时加载配置，但不要把它当成飞牛应用目录配置持久化方案。长期保存仍要依赖安装向导写入或维护者手动编辑 `<应用文件>/clash.meta/config/config.yaml`。
 - `PUT /configs?force=true` 可能在 mihomo 解析配置、拉取 provider 或网络阻塞时长时间不返回。前端必须用 `AbortController` 做超时，并在失败路径恢复“加载配置”按钮；不要只在 `catch` 里恢复按钮而没有超时。
 - 运行时导入生成的是 provider 配置，不是 MetaCubeXD 自己的远程 YAML 下载逻辑。普通订阅地址最终仍需要 NAS 能直连访问；如果用户环境连不上订阅域名，按钮超时是预期的可恢复失败。
-- 真要做到“一填订阅就写入应用文件目录并重启”，需要新增本地辅助服务或明确安全的后端 API，并处理 secret、权限、并发、订阅下载失败和失败回滚。
+- 真要做到“一填订阅就写入应用文件目录并重启”，需要新增本地辅助服务或明确安全的后端 API，并处理 secret、权限、并发、订阅下载失败和失败回滚。不能只靠静态 dashboard 前端写文件。
 
 后续要求:
 
-- 升级 MetaCubeXD 后，必须把右下角 `导入` 运行时加载逻辑重新套回 `config.js`，并重新核对 MetaCubeXD 是否仍使用 `PUT /configs?force=true`。
+- 升级 MetaCubeXD 后，必须把右下角 `配置` 运行时加载逻辑重新套回 `config.js`，并重新核对 MetaCubeXD 是否仍使用 `PUT /configs?force=true`。
 - 不要恢复首开自动弹窗；安装向导才是首次配置主入口。
 - 修改 `index.html` / `200.html` / `404.html` 的 `config.js?v=` 时要同步当前包版本。
 - 修改 `index.html` 后要同步 `sw.js` 中 `url:"./"` 的 MD5 revision。
 - 构建前跑 `node --check fnos-appstore-mihomo\app\dashboard\config.js`。
-- 构建脚本已检查 `clashMetaConfigDraftUrl`、`clearLegacySubscriptionState()`、`installConfigImportButton()`、`normalizeSubscriptionInput()`、`buildSubscriptionConfig()`、`applyRuntimeConfig()`、`fetchWithTimeout()` 和 `加载配置超时`，不要删掉这些标记。
+- 构建脚本已检查 `clashMetaConfigDraftUrl`、`clearLegacySubscriptionState()`、`installConfigImportButton()`、`normalizeSubscriptionInput()`、`buildSubscriptionConfig()`、`applyRuntimeConfig()`、`fetchWithTimeout()`、`配置订阅`、`应用配置` 和 `加载配置超时`，不要删掉这些标记。
 
 ### 2026-06-21: 启用一直卡住
 
@@ -1147,6 +1153,7 @@ geodata/geosite.dat
 - 如果从浏览器手动添加后端，密钥必须填写 `<应用文件>/clash.meta/config/secret` 里的值。
 - 如果密钥输入框里出现圆点，可能是浏览器或窗口自动填充，也可能是旧 endpoint 缓存；优先刷新并确认 `dashboard/config.js` 已注入当前 secret。
 - 如果用户手动设置了 `config.yaml` 的 `secret`，运行时 dashboard 会沿用它；外部 MetaCubeXD 也需要同步填写同一个值。
+- 如果用户把文档里的 `保留你原来的 secret` 这类占位符原样写进 `config.yaml`，`1.19.27-28` 及更早版本会把它当成真实密钥。`1.19.27-29` 起会识别这类占位符并重新生成真实 secret。
 - 浏览器地址是否就是 `http://<飞牛IP>:9090/ui/`
 - `external-controller` 是否监听 `0.0.0.0:9090`
 
@@ -1169,6 +1176,7 @@ geodata/geosite.dat
 - 从 `1.19.27-13` 开始，启动时生成或复用 `<应用文件>/clash.meta/config/secret`。
 - 如果用户已有非空 `config.yaml secret`，不覆盖用户配置，只同步给运行时 dashboard。
 - 如果旧配置是空密钥，则自动写入随机 secret。
+- 从 `1.19.27-29` 开始，`prepare_secret` 会调用 `is_placeholder_secret()`，识别并忽略 `保留你原来的 secret`、`change-me`、`REPLACE_ME` 等明显占位符，然后重新生成真实 secret 并写回 `config.yaml`。
 - 启动时复制 dashboard 到 `${TRIM_PKGVAR}/dashboard`，再把 secret 注入运行时 `config.js`。
 - mihomo 启动参数改为 `-ext-ui "${TRIM_PKGVAR}/dashboard"`。
 
@@ -1177,6 +1185,7 @@ geodata/geosite.dat
 - 这不是公网安全方案，只是避免 `9090` 裸奔空密钥。
 - 公网访问必须另加反向代理鉴权、防火墙或 VPN。
 - 如果要做到前端完全不暴露 secret，需要引入后端代理或飞牛系统级鉴权入口，复杂度明显上升。
+- 给用户示例完整配置时，不要让用户复制到可运行配置里的 `secret` 或订阅 token 留成自然语言占位符；要明确说“保留原文件这一行”，或用 `<REPLACE_WITH_EXISTING_SECRET>` 这类显眼占位并提醒必须替换。
 
 ### 2026-06-21: 首次打开面板，点“添加”没反应
 
