@@ -1,4 +1,4 @@
-﻿# 维护和迭代手册
+# 维护和迭代手册
 
 这份文档记录 fnOS Clash.Meta 原生应用包的结构、构建流程和升级步骤，方便后续维护。
 
@@ -11,12 +11,13 @@ D:\clash-meta
 │   ├── ICON.PNG               # 64x64 应用图标
 │   ├── ICON_256.PNG           # 256x256 应用图标
 │   ├── cmd/                   # fnOS 生命周期脚本
-│   │   └── main               # start/stop/status
+│   │   ├── main               # mihomo + fnOS 网关代理 start/stop/status
+│   │   └── config_callback    # 设置页替换配置、失败回滚
 │   ├── config/
 │   │   ├── privilege          # 运行用户和权限
-│   │   └── resource           # data-share/systemd 资源声明
+│   │   └── resource           # data-share 资源声明
 │   ├── LICENSE                # 本包元数据和维护脚本许可证
-│   ├── wizard/                # 飞牛原生向导，install 为首次订阅/配置 URL 引导
+│   ├── wizard/                # install/config/uninstall 原生向导
 │   └── app/
 │       ├── mihomo             # 当前构建架构的 Linux mihomo 二进制
 │       ├── config.default.yaml
@@ -25,7 +26,9 @@ D:\clash-meta
 │       ├── dashboard/         # 内嵌 MetaCubeXD 静态文件
 │       └── ui/                # 飞牛桌面入口源码；打包后位于 app.tgz 顶层 ui/
 ├── dist/                      # 构建产物
-├── scripts/build-fpk.py        # 当前正式打包脚本
+├── scripts/build-fpk.py       # 当前正式打包脚本
+├── scripts/gateway-proxy/     # 统一网关代理及单元测试
+├── go.mod                     # 网关代理构建模块
 ├── .tools/                    # 本地打包工具
 └── .tmp/                      # 下载和解包缓存
 ```
@@ -38,18 +41,20 @@ D:\clash-meta
 
 ```text
 appname=clash.meta
-version=1.19.27-29
+version=1.19.27-31
 platform=x86
 desktop_uidir=ui
 desktop_applaunchname=clash.meta.Application
-service_port=9090
-checkport=true
-disable_authorization_path=true
+checkport=false
+ctl_stop=true
+disable_authorization_path=false
 ```
 
 构建 x86 包时 `platform=x86`，构建 ARM 包时改为 `platform=arm`。
 
 当前包不设置 `install_type=root`。飞牛文档说明 root 权限模式仅适用于官方合作企业开发者，第三方普通 Native 应用不应依赖 root 安装或系统目录写入。本包不需要低端口、系统目录写入或硬件访问，因此保持普通安装方式。
+
+`maintainer` / `distributor` 填 fnOS 包的实际维护者 `qiyueqixi`，不要写成 mihomo 上游 `MetaCubeX`。上游作者和许可证在 `THIRD_PARTY_NOTICES.md` 中归属，包元数据不能让用户误以为这是 MetaCubeX 官方发布的 fnOS 包。
 
 版本号建议用:
 
@@ -81,6 +86,8 @@ disable_authorization_path=true
 1.19.27-27
 1.19.27-28
 1.19.27-29
+1.19.27-30
+1.19.27-31
 1.20.0-1
 ```
 
@@ -151,13 +158,27 @@ ${TRIM_PKGVAR}/wizard/config.url
 
 之所以保存两份，是因为不同 fnOS 版本或安装阶段不一定都能稳定提供 `TRIM_DATA_SHARE_PATHS`。主数据仍以应用文件目录为准，`${TRIM_PKGVAR}/wizard` 只做首次启动兜底。
 
+### `wizard/config` 与 `cmd/config_callback`
+
+从 `1.19.27-30` 开始，应用设置页提供与安装向导一致的两个输入框：订阅/导入链接和完整 YAML URL。两个都留空表示不修改，两个都填写时完整 YAML 优先。
+
+配置回调流程：
+
+1. 把当前 `config.yaml` 复制为 `config.yaml.settings-backup`。
+2. 复用 `cmd/install_callback` 的 URL 解析与保存逻辑。
+3. 停止 mihomo 和网关代理。
+4. 让 `cmd/main` 根据新向导值重新生成配置并启动验证。
+5. 新配置启动失败时恢复备份并重新启动旧配置，同时通过 `${TRIM_TEMP_LOGFILE}` 把结果显示给用户。
+
+不要在设置向导中回填或显示旧订阅 URL。订阅通常包含私有 token，空白表单加“留空不修改”更符合敏感信息处理原则。
+
 ### `wizard/uninstall`
 
 飞牛原生卸载向导。当前提供三种数据处理方式:
 
 - `keep_all`: 保留全部用户数据，默认推荐。
 - `delete_other_data_keep_config_subscription`: 删除运行缓存、临时文件和旧日志，保留 `config.yaml`、`secret`、订阅 provider 和安装向导保存的订阅/配置 URL。
-- `delete_all`: 删除整个 `<应用文件>/clash.meta` 应用文件目录。
+- `delete_all`: 停止服务后删除 `<应用文件>/clash.meta`，以及该卷内 `@appdata`、`@apphome`、`@appconf`、`@appmeta`、`@apptemp` 下的 `clash.meta` 私有目录。
 
 ### `cmd/uninstall_callback`
 
@@ -167,13 +188,14 @@ ${TRIM_PKGVAR}/wizard/config.url
 
 - `keep_all`: 不删除任何应用文件目录内容。
 - `delete_other_data_keep_config_subscription`: 删除 `config/cache.db*`、`cache/`、`tmp/` 和旧 `logs/`，保留 `config/providers/`、`config/subscription.yaml`、`config/wizard/` 和 `${TRIM_PKGVAR}/wizard/`。
-- `delete_all`: 删除整个 `APP_SHARE`，但脚本会拒绝删除空路径、`/`、`/var`、`/var/apps`、应用安装目录和运行目录等危险路径。
+- `delete_all`: 删除整个 `APP_SHARE`，再根据 `readlink -f "${TRIM_PKGVAR}"` 解析所在卷，只删除该卷六个精确白名单目录中的 `clash.meta`。脚本拒绝空路径、卷根目录、系统目录、应用安装目录和其他非白名单路径。
 
 重要约束:
 
 - `delete_other_data_keep_config_subscription` 必须保留 `config.yaml`、`secret`、订阅 provider、订阅文件和安装向导保存的订阅 URL。
 - `delete_subscription_cache` 是 `1.19.27-18` 到 `1.19.27-21` 的历史值，脚本只作为升级兼容入口接受，行为映射到新的保留订阅清理逻辑。
 - 删除逻辑必须通过 `safe_remove_path` 或 `safe_remove_runtime_path`，不要裸写 `rm -rf "${变量}"`。
+- 清理 `logs/` 后不能再调用会写 `logs/mihomo.log` 的函数，否则会把已删除的日志目录重新创建；卸载结果改写 stderr 或 `${TRIM_TEMP_LOGFILE}`。
 - 如果后续新增缓存位置，必须同步修改本节和 `scripts/build-fpk.py` 校验。
 
 ### `cmd/main`
@@ -194,13 +216,15 @@ cmd/main status
 - 首次启动根据安装向导创建 `<应用文件>/clash.meta/config/config.yaml`；没有向导值时复制 `app/config.default.yaml`
 - 日志写入 `<应用文件>/clash.meta/logs/mihomo.log`
 - runtime 二进制写入 `${TRIM_PKGVAR}/bin/mihomo`
+- fnOS 网关代理写入 `${TRIM_PKGVAR}/bin/gateway-proxy`
 - runtime dashboard 写入 `${TRIM_PKGVAR}/dashboard`，不要依赖安装目录可写
 - controller secret 写入 `<应用文件>/clash.meta/config/secret`，并同步到 `config.yaml`
-- PID 写入 `${TRIM_PKGVAR}/run/mihomo.pid`
+- PID 分别写入 `${TRIM_PKGVAR}/run/mihomo.pid` 和 `gateway.pid`；`status` 要求两个进程和 Unix Socket 同时存在
 - 启动失败时写入 `${TRIM_TEMP_LOGFILE}`，让飞牛应用中心前端能展示错误
 - 启动参数包含 `-ext-ui "${TRIM_PKGVAR}/dashboard"`，确保使用注入了 secret 的运行时 Web 面板
 - 启动前复制包内 `${TRIM_APPDEST}/geodata/` 到配置目录，覆盖损坏或半下载的 geodata 文件
 - 安装向导填写订阅地址或 `clash://install-config?url=...` 时生成 `proxy-providers.subscription`，provider 下载固定走 `DIRECT`，订阅域名加直连规则，普通流量默认 `MATCH,PROXY`
+- 新生成的订阅配置包含 `自动选择` url-test 组，`PROXY` 默认选择该组，同时保留手动节点和 `DIRECT`
 - 安装向导填写完整 YAML 配置 URL 时用 `curl` 或 `wget` 短超时下载；下载失败回退默认配置
 
 ### controller secret
@@ -216,10 +240,9 @@ cmd/main status
 
 安全边界:
 
-- 这个机制解决的是“局域网里不能空密钥调用 `9090` API”。
-- 因为内嵌 Web 面板需要自动连接，secret 会出现在运行时 `config.js` 中；能访问 `9090/ui/` 的人仍可能读到它。
-- 不要把 `9090` 直接裸露到公网。公网访问必须走飞牛公共网关、反向代理鉴权、防火墙或 VPN。
-- 如果后续接入飞牛统一网关，要按官方 `gatewayPrefix` / `gatewaySocket` 机制实现，不要为了公网入口重新改成 root 包。
+- `external-controller` 从 `1.19.27-30` 起强制迁移为 `127.0.0.1:9090`，局域网和公网都不能直接访问控制器。
+- 内嵌 Web 面板仍需要 secret，因此运行时 `config.js` 会包含它；但该文件只能经 fnOS 统一网关和登录校验访问。
+- 不要把控制器重新改成 `0.0.0.0:9090`，也不要为了网关入口改成 root 包。
 
 ### `geodata/`
 
@@ -274,9 +297,10 @@ F1FF796F579A242461DB509679515ADE127231989624A68CC588B52AF1514493  geosite.dat
       "desc": "Clash.Meta mihomo core with built-in MetaCubeXD web dashboard.",
       "icon": "images/{0}.png",
       "type": "iframe",
-      "protocol": "http",
-      "port": "9090",
-      "url": "/ui/",
+      "protocol": "",
+      "gatewayPrefix": "/app/clash-meta",
+      "gatewaySocket": "clash-meta.sock",
+      "url": "/app/clash-meta/ui/",
       "allUsers": false,
       "noDisplay": false
     }
@@ -287,6 +311,22 @@ F1FF796F579A242461DB509679515ADE127231989624A68CC588B52AF1514493  geosite.dat
 `manifest` 的 `desktop_applaunchname` 必须和这里的 `clash.meta.Application` 一致。应用中心“打开”按钮和桌面图标都依赖这个入口 ID，并且桌面入口必须显式设置 `noDisplay=false`。
 
 `allUsers=false` 是有意设计。MetaCubeXD 是 mihomo 控制面板，不是普通展示页面；默认不应对所有飞牛用户开放。需要给非管理员使用时，由飞牛侧授权或后续做安装向导/权限说明。
+
+统一网关会先校验 fnOS 登录态，再把请求转发到 `${TRIM_APPDEST}/clash-meta.sock`。入口中不要同时保留 `port`；官方文档明确说明统一网关模式会忽略 `protocol` 和 `port`。
+
+### `scripts/gateway-proxy`
+
+mihomo 不能直接适配 `/app/clash-meta` 路径前缀，因此包内增加一个无运行时依赖的 Go 静态二进制：
+
+- 监听 `${TRIM_APPDEST}/clash-meta.sock`。
+- 剥离 `/app/clash-meta` 后反向代理到 `127.0.0.1:9090`。
+- 保留 HTTP Upgrade，MetaCubeXD 的 WebSocket 日志和流量接口可以正常工作。
+- `/app/clash-meta/_fnos/config` 只接受 `POST`，并要求网关注入 `X-Trim-Isadmin: true`。
+- 配置请求最大 4 MiB，写入前检查关键 mihomo 字段。
+- 先生成临时文件并 `fsync`，备份旧文件为 `config.yaml.bak`，原子替换后调用 mihomo `/configs?force=true`。
+- mihomo 拒绝新配置时恢复旧 `config.yaml`。
+
+网关代理分别交叉编译为 Linux AMD64 v1 和 ARM64。最终 FPK 只包含对应架构二进制，不包含 Go 工具链。
 
 ### 第三方许可
 
@@ -311,7 +351,8 @@ MetaCubeXD 默认后端配置:
 
 ```js
 (function () {
-  const backendURL = `${window.location.protocol}//${window.location.host}`
+  const gatewayPrefix = "/app/clash-meta"
+  const backendURL = `${window.location.origin}${gatewayPrefix}`
   const localEndpoint = {
     id: "local-mihomo",
     url: backendURL,
@@ -333,21 +374,21 @@ MetaCubeXD 默认后端配置:
 })()
 ```
 
-这样从 `http://<飞牛IP>:9090/ui/` 打开面板时，会默认连接同一个 `9090` 控制端口，并自动注册 `local-mihomo` 本地端点。不要只设置 `defaultBackendURL`，它在 MetaCubeXD 里只是默认候选地址，不一定会保存和选中端点。
+这样从统一网关打开面板时，会把 API 和 WebSocket 都发到相同网关前缀，并自动注册 `local-mihomo` 本地端点。不要退回当前 host 根路径，否则请求会绕过 `/app/clash-meta` 路由。
 
 从 `1.19.27-21` 开始，`config.js` 不再自动弹出订阅配置，避免和原生安装向导重复。Web 面板保留一个手动触发的右下角配置按钮:
 
 - 从 `1.19.27-26` 开始按钮文案为 `导入`，这是本包额外注入的按钮，不是 MetaCubeXD 原生按钮。
 - 从 `1.19.27-27` 开始，`PUT /configs?force=true` 和后台 provider 刷新都走 `fetchWithTimeout()`；运行时导入配置默认关闭 provider `health-check`，避免导入后立刻测速造成长时间等待。
-- 从 `1.19.27-28` 开始按钮文案改为 `配置`，弹窗标题改为 `配置订阅`，提交按钮改为 `应用配置`。功能仍是运行时加载订阅配置，不写回 `config.yaml`。
+- 从 `1.19.27-28` 开始按钮文案改为 `配置`，弹窗标题改为 `配置订阅`，提交按钮改为 `应用配置`。
+- 从 `1.19.27-30` 开始改调统一网关 helper 的 `POST /_fnos/config`，配置会持久写入并热加载。
 - `clashMetaConfigDraftUrl` 用来保留弹窗草稿。
 - 兼容清理旧版 `clashMetaSubscriptionPendingUrl` / `clashMetaSubscriptionDraftUrl`，避免升级后继续触发旧的 `#/profiles` 填表流程。
 - 支持普通 `http(s)` 订阅和 `clash://install-config?url=...&name=...` 导入链接。
-- 提交后前端生成一份最小 mihomo 订阅配置，调用 `PUT /configs?force=true` 加载运行时配置，然后跳转到 `#/proxies`。
+- 提交后前端生成完整的最小订阅配置，经 helper 原子写入 `config.yaml`、调用 mihomo 热加载，然后跳转到 `#/proxies`。
 - 如果控制接口 30 秒内没有返回，弹窗会显示超时错误并恢复按钮；此时可能是 mihomo 正在后台拉订阅，也可能是 NAS 无法直连订阅域名。
-- 这段逻辑不承诺写回 `<应用文件>/clash.meta/config/config.yaml`。持久配置仍以原生安装向导或手动编辑 `config.yaml` 为准。
-- 纯静态 MetaCubeXD 页面没有飞牛应用文件目录写入权限。除非以后新增受保护的本地 helper 服务或改成 helper 代理 dashboard，否则不要把页面按钮描述成“永久保存”。
-- `scripts/build-fpk.py` 会校验 `clashMetaConfigDraftUrl`、`clearLegacySubscriptionState()`、`installConfigImportButton()`、`normalizeSubscriptionInput()`、`buildSubscriptionConfig()`、`applyRuntimeConfig()`、`fetchWithTimeout()`、`/configs?force=true`、`配置订阅`、`应用配置`、`加载配置超时` 和 `运行时配置已加载`，并禁止恢复 `routeToProfiles()`、`openProfileImportUI()`、`prefillSubscriptionURL()` 等旧逻辑。
+- helper 写入接口只信任 fnOS 统一网关注入的管理员 Header，不接受浏览器自报用户身份。
+- `scripts/build-fpk.py` 会校验该按钮、`/_fnos/config`、持久化成功文案，并禁止恢复旧 Profiles 填表逻辑。
 
 ## 上游来源
 
@@ -436,8 +477,10 @@ app/dashboard/pwa-512x512.png -> ICON_256.PNG 和 app/ui/images/icon_256.png
 在 `D:\clash-meta` 执行。当前不要再直接用 Windows 版 `fnpack build` 产出最终包，因为它会丢 Unix 执行权限。正式构建使用:
 
 ```powershell
-python scripts\build-fpk.py --version 1.19.27-29
+python scripts\build-fpk.py --version 1.19.27-31
 ```
+
+网关 helper 需要 Go 1.22 或更新版本。打包器会优先寻找系统 `go`，也支持解压在 `.tmp/go-full/go/` 的便携工具链；找到 Go 时自动交叉编译 x86/ARM，最终 FPK 不包含 Go。没有 Go 时只有在 `.tmp/downloads/` 已存在两个缓存二进制才可继续。
 
 脚本会自动:
 
@@ -445,23 +488,27 @@ python scripts\build-fpk.py --version 1.19.27-29
 - 校验桌面入口 `noDisplay=false`
 - 校验桌面入口 `allUsers=false`
 - 校验 `config/privilege` 使用 `run-as=package`
-- 校验 `config/resource` 声明 `data-share`，并给应用用户 `rw` 权限
+- 校验 `config/resource` 只声明实际使用的 `data-share`，不保留空 `systemd-unit`
 - 校验 `manifest` 没有 `install_type=root`
 - 校验外层 `LICENSE` 和内层 `THIRD_PARTY_NOTICES.md`
 - 校验入口图标 `app/ui/images/64.png` 和 `app/ui/images/256.png` 存在
 - 校验内置 `country.mmdb`、`geoip.metadb`、完整版 `geoip.dat` 和完整版 `geosite.dat` 存在且大小合理
 - 校验默认配置使用 `mixed-port: 7899` 和 `geo-auto-update: false`，不包含 `external-ui-name` / `external-ui-url`，DNS bootstrap 不依赖 DoH 域名
-- 校验 `dashboard/config.js` 包含本地 endpoint 自举和右下角运行时配置按钮
-- 校验 `cmd/main` 包含 `TRIM_DATA_SHARE_PATHS`、`${TRIM_TEMP_LOGFILE}`、随机 secret、占位符 secret 防呆、内置 geodata 和运行时 dashboard 逻辑
+- 校验 `dashboard/config.js` 包含统一网关 endpoint 自举和持久化配置按钮
+- 校验 `cmd/main` 包含双进程状态、Unix Socket、`${TRIM_TEMP_LOGFILE}`、随机 secret、内置 geodata 和运行时 dashboard
 - 校验 `wizard/install` 包含中文原生安装向导、订阅/导入链接、完整 YAML 配置 URL 字段和 `clash://install-config` 提示
 - 校验 `wizard/uninstall` 包含中文原生卸载向导和三种数据处理方式
+- 校验 `wizard/config` 与 `cmd/config_callback` 包含配置替换、备份和失败恢复逻辑
 - 校验 `cmd/install_callback` 会保存 `wizard_subscription_url`、`wizard_config_url`，并兼容旧字段 `wizard_config_mode`
 - 校验 `cmd/uninstall_callback` 会按 `wizard_uninstall_data_action` 保留、清缓存或删除全部数据
 - 校验 `cmd/main` 包含安装向导配置生成、订阅 `proxy-providers`、订阅 provider 直连下载、旧订阅配置迁移、端口/DNS 迁移和完整配置 URL 下载逻辑
 - 校验 `dashboard/*.html` 中 `config.js?v=<version>` 与 manifest 版本一致
+- 校验 `sw.js` 中 `url:"./"` 的 revision 等于当前 `index.html` MD5，避免内嵌窗口继续使用旧首页
 - x86 包使用 `.tmp/downloads/mihomo-linux-amd64-compatible`
 - ARM 包使用 `.tmp/downloads/mihomo-linux-arm64`
-- 为 `cmd/*` 和 `mihomo` 写入 `0755` 权限
+- 网关代理使用 `.tmp/downloads/gateway-proxy-linux-amd64` 和 `gateway-proxy-linux-arm64`
+- 找到 Go 工具链时自动从 `scripts/gateway-proxy` 重新交叉编译上述二进制
+- 为 `cmd/*`、`mihomo` 和 `gateway-proxy` 写入 `0755` 权限
 - 按官方 `fnpack` 布局生成 `app.tgz`，让 `mihomo`、`dashboard/`、`ui/`、`geodata/` 位于顶层
 - 生成 `dist/SHA256SUMS.txt`
 
@@ -476,6 +523,7 @@ python scripts\build-fpk.py --version 1.19.27-29
 
 ```text
 mihomo
+gateway-proxy
 config.default.yaml
 dashboard/index.html
 dashboard/config.js
@@ -489,8 +537,8 @@ geodata/geoip.dat
 geodata/geosite.dat
 ```
 
-5. `dashboard/config.js` 默认后端指向当前访问 host，并会写入/选中 `local-mihomo` endpoint。
-6. `cmd/main` 包含 `prepare_secret`、`prepare_dashboard` 和 `-ext-ui "${DASHBOARD_DIR}"`。
+5. `dashboard/config.js` 默认后端指向 `${origin}/app/clash-meta`，并会写入/选中 `local-mihomo` endpoint。
+6. `cmd/main` 包含 `prepare_secret`、`prepare_dashboard`、网关启动和 `-ext-ui "${DASHBOARD_DIR}"`。
 7. `tar -tvf` 检查 `cmd/main` 是 `rwxr-xr-x`。
 8. 解开内层 `app.tgz` 后检查 `mihomo` 是 `rwxr-xr-x`。
 9. 重新生成 `dist/SHA256SUMS.txt`。
@@ -504,7 +552,7 @@ geodata/geosite.dat
 17. `geodata/country.mmdb`、`geodata/geoip.metadb`、`geodata/geoip.dat` 和 `geodata/geosite.dat` 存在。
 18. `app.tgz` 顶层包含 `ui/config`、`ui/images/64.png`、`ui/images/256.png`。
 19. 外层 `.fpk` 不需要包含 `ui/config`；官方 `fnpack` 也不会把入口放在外层。
-20. `config/resource` 给 `clash.meta` data-share `rw` 权限。
+20. `config/resource` 声明稳定的 `clash.meta` data-share，且没有未使用的空资源声明。
 21. `cmd/main` 使用 `TRIM_DATA_SHARE_PATHS` 选择应用文件目录，并在失败时写 `${TRIM_TEMP_LOGFILE}`。
 22. 外层 `.fpk` 包含 `wizard/install`。
 23. 外层 `.fpk` 包含 `wizard/uninstall`。
@@ -513,23 +561,72 @@ geodata/geosite.dat
 26. `cmd/main` 包含 `create_initial_config`、`write_subscription_config`、`download_wizard_config`。
 27. 订阅模式生成的 `proxy-providers.subscription` 包含 `proxy: DIRECT`。
 28. `cmd/main` 包含 `migrate_subscription_config`，用于把旧安装向导订阅配置迁移到 provider 直连下载。
+29. 外层 `.fpk` 包含 `wizard/config`，`cmd/config_callback` 为 `0755`。
+30. `ui/config` 使用 `gatewayPrefix=/app/clash-meta`、`gatewaySocket=clash-meta.sock`，且不含 `port`。
+31. 内层 `gateway-proxy` 为对应架构 Linux 可执行文件并带执行位。
+32. `go test ./scripts/gateway-proxy` 通过。
 
 ## 解包检查命令
 
 ```powershell
 Remove-Item -Recurse -Force '.tmp\inspect-x86','.tmp\inspect-x86-app' -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path '.tmp\inspect-x86','.tmp\inspect-x86-app' | Out-Null
-tar -xf 'dist\clash.meta_1.19.27-29_x86.fpk' -C '.tmp\inspect-x86'
+tar -xf 'dist\clash.meta_1.19.27-31_x86.fpk' -C '.tmp\inspect-x86'
 tar -xzf '.tmp\inspect-x86\app.tgz' -C '.tmp\inspect-x86-app'
 Get-Content '.tmp\inspect-x86\manifest'
 Get-Content '.tmp\inspect-x86\config\privilege'
 Get-Content '.tmp\inspect-x86-app\ui\config'
-Get-ChildItem '.tmp\inspect-x86\LICENSE','.tmp\inspect-x86-app\THIRD_PARTY_NOTICES.md','.tmp\inspect-x86-app\ui\images\64.png','.tmp\inspect-x86-app\ui\images\256.png','.tmp\inspect-x86-app\mihomo','.tmp\inspect-x86-app\dashboard\index.html','.tmp\inspect-x86-app\geodata\country.mmdb','.tmp\inspect-x86-app\geodata\geoip.metadb','.tmp\inspect-x86-app\geodata\geoip.dat','.tmp\inspect-x86-app\geodata\geosite.dat'
+Get-ChildItem '.tmp\inspect-x86\LICENSE','.tmp\inspect-x86\wizard\config','.tmp\inspect-x86-app\THIRD_PARTY_NOTICES.md','.tmp\inspect-x86-app\ui\images\64.png','.tmp\inspect-x86-app\ui\images\256.png','.tmp\inspect-x86-app\mihomo','.tmp\inspect-x86-app\gateway-proxy','.tmp\inspect-x86-app\dashboard\index.html','.tmp\inspect-x86-app\geodata\country.mmdb','.tmp\inspect-x86-app\geodata\geoip.metadb','.tmp\inspect-x86-app\geodata\geoip.dat','.tmp\inspect-x86-app\geosite.dat'
 ```
 
 ## 运行时排障
 
 ## 踩坑记录
+
+### 2026-07-24: 删除全部数据不能只删应用文件目录
+
+现象:
+
+- 旧版选择“删除全部应用数据”后，只删除了 `<应用文件>/clash.meta`。
+- `${TRIM_PKGVAR}/wizard` 以及 fnOS 在 `@appdata`、`@apphome`、`@appconf`、`@appmeta`、`@apptemp` 创建的应用私有目录可能残留。
+- “删除其他数据，保留配置与订阅”删掉 `logs/` 后又调用 `log_msg`，反而重新创建了空日志目录。
+
+修复:
+
+- 从 `1.19.27-31` 开始，`cmd/uninstall_init` 先调用 `cmd/main stop`，避免卸载时 mihomo 或网关仍持有文件。
+- `delete_all` 先删除应用文件目录，再对 `readlink -f "${TRIM_PKGVAR}"` 解析出的卷执行私有目录清理。
+- 私有目录清理只允许六个精确目标：`@appdata/clash.meta`、`@apphome/clash.meta`、`@appconf/clash.meta`、`@appmeta/clash.meta`、`@apptemp/clash.meta` 和 `@appshare/clash.meta`。卷根目录为空、为 `/` 或落在系统目录时立即拒绝。
+- 删除日志目录后的结果通过 stderr 或 `${TRIM_TEMP_LOGFILE}` 报告，不再写回应用日志。
+- 任一步删除失败都返回非零，让 fnOS 显示卸载失败，而不是留下残留后仍报告成功。
+
+后续要求:
+
+- 新增 fnOS 私有目录时，必须同步增加精确白名单、构建校验和实机卸载测试，禁止根据字符串拼接删除任意父目录。
+- 完整卸载测试要分别验证“保留全部”“保留配置与订阅”“删除全部”三条路径；特别检查删除全部后六个目录均不存在。
+
+### 2026-07-23: 新版开发文档的统一网关适合控制面板，loading 不需要照搬
+
+MoviePilot 项目验证了新版 `gatewayPrefix` / `gatewaySocket` 可以稳定承载常驻 Web、API 和 WebSocket。Clash.Meta 控制面板也适合统一网关，因为它需要 fnOS 登录校验，并且不应把 controller 直接暴露到局域网。
+
+落地时不能只改 `app/ui/config`：mihomo 不认识 `/app/clash-meta` 前缀，所以必须由本地 helper 剥离前缀；MetaCubeXD 的 endpoint 也必须包含这个前缀。只改入口会出现 HTML 能打开、API 和 WebSocket 全部 404 的假成功。
+
+新版文档同时增加了应用 loading 能力，但 mihomo 通常两三秒即可启动，现有 fnOS 启用状态和 `${TRIM_TEMP_LOGFILE}` 错误提示已足够。本项目明确不增加 loading 页面、背景图或轮询逻辑，避免为短启动流程引入额外状态和维护成本。
+
+### 2026-07-23: Web 配置按钮不能只调用运行时 API
+
+旧按钮调用 `PUT /configs?force=true` 并传 `payload`，只修改进程内配置，不写磁盘。用户当时看到节点和规则正常，但应用重启后重新读取旧 `config.yaml`，订阅地址就像“消失”了一样。
+
+`1.19.27-30` 通过受 fnOS 管理员鉴权保护的 helper 修复：先备份和原子写盘，再让 mihomo 从实际文件热加载。维护时不要重新改回纯前端运行时加载。
+
+### 2026-07-23: Windows CRLF 会破坏 Linux 生命周期脚本
+
+Windows Git 或编辑器可能把 `cmd/main` 变成 CRLF。fnOS 若直接执行脚本，首行会被解释为 `/bin/bash\r`；即使用 `bash cmd/main`，行尾 `\r` 也可能进入变量或 case 分支。
+
+正式构建前必须保证 `cmd/*` 为 LF。打包器还应检查归档内脚本不存在 CRLF，并显式写入 `0755`。不要以“Windows 上能打开文件”作为脚本格式验证。
+
+### 2026-07-23: data-share 权限不要重复声明给自身用户
+
+新版资源文档说明 fnOS 会自动给应用运行用户授予声明 share 的 ACL。`permission.rw` 用于其他应用或其他用户，不需要把 `clash.meta` 自己再写进去；空的 `systemd-unit` 也不代表使用了 systemd，应删除未使用资源，保持最小声明。
 
 ### 2026-06-21: 内嵌 UI 不能让 mihomo 自己去 GitHub 下载
 
@@ -845,6 +942,7 @@ Start Mixed(http+socks) server error: listen tcp :7890: bind: address already in
 - 前端调用 mihomo 标准控制接口 `PUT /configs?force=true`，请求体为 `{ "path": "", "payload": "<yaml>" }`，成功后跳转 `#/proxies`。
 - 从 `1.19.27-27` 开始，运行时导入里的 `proxy-providers.subscription.health-check.enable` 默认为 `false`，并给 `PUT /configs?force=true` 加 30 秒超时、给后台 provider 刷新加 8 秒超时。
 - 从 `1.19.27-28` 开始，按钮文案改成 `配置`，弹窗标题改成 `配置订阅`。这是同一个运行时配置能力，只是避免用户把它理解成 MetaCubeXD 原生“导入配置文件”或永久写盘。
+- 从 `1.19.27-30` 开始，上述“只改运行时”的实现已被统一网关 helper 取代：按钮会写盘、备份并热加载。下面关于纯 `PUT payload` 的内容只用于理解旧版本故障，不再是当前实现。
 
 踩坑:
 
@@ -984,6 +1082,8 @@ Select-String -Path '.tmp\inspect-x86\cmd\main' -Pattern 'TRIM_PKGVAR}/bin|prepa
 - 应用已经能成功启用。
 - 直接访问 `http://<飞牛IP>:9090/ui/` 可以打开内嵌 MetaCubeXD。
 - 但飞牛桌面没有图标，应用中心卡片上也没有“打开”按钮。
+
+这是 `1.19.27-9` 到旧端口入口时期的历史现象。`1.19.27-30` 的入口改为 `/app/clash-meta/ui/`，9090 不再接受局域网访问。
 
 根因:
 
@@ -1139,23 +1239,24 @@ geodata/geosite.dat
 检查:
 
 - 应用状态是否运行中
-- `service_port=9090` 是否被飞牛识别
-- 外层 `ui/config` 的入口名是否匹配 `desktop_applaunchname`
+- `app.tgz` 顶层 `ui/config` 的入口名是否匹配 `desktop_applaunchname`
 - 入口是否设置了 `noDisplay=false`
-- `config.yaml` 是否有 `external-controller: 0.0.0.0:9090`
-- `app/dashboard/config.js` 是否被替换回空后端
+- `ui/config` 是否声明 `gatewayPrefix=/app/clash-meta` 和 `gatewaySocket=clash-meta.sock`
+- 日志是否出现 `fnOS gateway listening on .../clash-meta.sock`
+- `config.yaml` 是否有 `external-controller: 127.0.0.1:9090`
+- `app/dashboard/config.js` 是否仍使用 `/app/clash-meta` 后端前缀
 
 ### 面板打开但连接不上后端
 
 检查:
 
 - `1.19.27-13` 以后默认会自动生成 secret，内嵌 MetaCubeXD 正常不需要手动填写。
-- 如果从浏览器手动添加后端，密钥必须填写 `<应用文件>/clash.meta/config/secret` 里的值。
+- 不要再从浏览器手动添加 `http://飞牛IP:9090` 后端；统一网关入口会自动注册本地 endpoint。
 - 如果密钥输入框里出现圆点，可能是浏览器或窗口自动填充，也可能是旧 endpoint 缓存；优先刷新并确认 `dashboard/config.js` 已注入当前 secret。
 - 如果用户手动设置了 `config.yaml` 的 `secret`，运行时 dashboard 会沿用它；外部 MetaCubeXD 也需要同步填写同一个值。
 - 如果用户把文档里的 `保留你原来的 secret` 这类占位符原样写进 `config.yaml`，`1.19.27-28` 及更早版本会把它当成真实密钥。`1.19.27-29` 起会识别这类占位符并重新生成真实 secret。
-- 浏览器地址是否就是 `http://<飞牛IP>:9090/ui/`
-- `external-controller` 是否监听 `0.0.0.0:9090`
+- 浏览器路径是否位于 `/app/clash-meta/ui/`
+- `external-controller` 是否只监听 `127.0.0.1:9090`
 
 ### 2026-06-21: 空密钥存在安全风险
 
@@ -1179,12 +1280,12 @@ geodata/geosite.dat
 - 从 `1.19.27-29` 开始，`prepare_secret` 会调用 `is_placeholder_secret()`，识别并忽略 `保留你原来的 secret`、`change-me`、`REPLACE_ME` 等明显占位符，然后重新生成真实 secret 并写回 `config.yaml`。
 - 启动时复制 dashboard 到 `${TRIM_PKGVAR}/dashboard`，再把 secret 注入运行时 `config.js`。
 - mihomo 启动参数改为 `-ext-ui "${TRIM_PKGVAR}/dashboard"`。
+- 从 `1.19.27-30` 开始，控制器收口到 `127.0.0.1:9090`，面板只经 fnOS 统一网关访问；这才是当前网络边界。
 
 局限:
 
-- 这不是公网安全方案，只是避免 `9090` 裸奔空密钥。
-- 公网访问必须另加反向代理鉴权、防火墙或 VPN。
-- 如果要做到前端完全不暴露 secret，需要引入后端代理或飞牛系统级鉴权入口，复杂度明显上升。
+- fnOS 网关负责登录校验，mihomo secret 仍负责本地代理到控制器时的第二层鉴权。
+- 前端运行时仍能读取自身 endpoint secret，因此入口保持 `allUsers=false`，只向管理员展示。
 - 给用户示例完整配置时，不要让用户复制到可运行配置里的 `secret` 或订阅 token 留成自然语言占位符；要明确说“保留原文件这一行”，或用 `<REPLACE_WITH_EXISTING_SECRET>` 这类显眼占位并提醒必须替换。
 
 ### 2026-06-21: 首次打开面板，点“添加”没反应
@@ -1194,6 +1295,8 @@ geodata/geosite.dat
 - 应用已启用成功，`http://<飞牛IP>:9090/ui/` 可以打开 MetaCubeXD。
 - 首屏要求填写后端地址和密钥。
 - 后端地址填 `http://<飞牛IP>:9090`、密钥留空后，点击添加没有明显跳转。
+
+这是旧端口入口的历史排障记录。`1.19.27-30` 不应出现手工添加本地后端页面；若出现，检查统一网关 endpoint 自举和浏览器旧站点数据。
 
 根因:
 
@@ -1207,7 +1310,7 @@ geodata/geosite.dat
 
 ```js
 window.metacubexd.endpoint = {
-  url: `${window.location.protocol}//${window.location.host}`,
+  url: `${window.location.origin}/app/clash-meta`,
   secret: "",
 }
 ```
@@ -1215,17 +1318,10 @@ window.metacubexd.endpoint = {
 - 同时维护 `localStorage.endpointList` 和 `localStorage.selectedEndpoint`，注册并优先选中 `local-mihomo`。
 - 只在当前选中端点为空、失效、就是 `local-mihomo`，或旧端点 host 等于当前访问 host 时自动切换，避免覆盖用户手动添加的远程后端。
 
-实机排障:
-
-```text
-http://<飞牛IP>:9090/version
-```
-
-如果这个地址能返回版本信息，但面板仍然停在 setup，优先升级到 `1.19.27-12`；如果仍失败，在浏览器开发者工具里清理 `http://<飞牛IP>:9090` 的站点数据后重开应用。
+当前实机排障应从 fnOS 桌面入口打开 `/app/clash-meta/ui/`，并在日志中确认本机 controller 和 Unix Socket 都已启动。不要把 9090 改回 LAN 监听来绕过网关。
 
 ## 后续可改进项
 
-- 安装向导已经支持一填订阅生成初始配置；如需运行后在 Web 内直接改写并重启配置，再增加本地辅助服务或安全后端 API。
-- 接入飞牛统一网关，按官方 `gatewayPrefix` / `gatewaySocket` 和登录认证标准处理公网访问。
-- 增加更严格的防火墙和访问控制说明。
 - 在真实 fnOS 设备上跑安装、启动、停止、升级、卸载完整测试。
+- 后续升级 mihomo 或 MetaCubeXD 时，补跑统一网关 HTTP、WebSocket 和配置回滚实机测试。
+- 如果 fnOS 后续公开更细的网关角色 Header，再评估是否允许非管理员只读访问；当前仍只向管理员展示入口。

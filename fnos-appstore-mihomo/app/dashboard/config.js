@@ -1,5 +1,6 @@
 (function () {
-  const backendURL = `${window.location.protocol}//${window.location.host}`
+  const gatewayPrefix = "/app/clash-meta"
+  const backendURL = `${window.location.origin}${gatewayPrefix}`
   const configImportDraftUrlKey = "clashMetaConfigDraftUrl"
   const legacySubscriptionPendingUrlKey = "clashMetaSubscriptionPendingUrl"
   const legacySubscriptionDraftUrlKey = "clashMetaSubscriptionDraftUrl"
@@ -168,7 +169,7 @@ bind-address: "*"
 mode: rule
 log-level: info
 ipv6: false
-external-controller: 0.0.0.0:9090
+external-controller: 127.0.0.1:9090
 external-ui: dashboard
 secret: ${yamlQuote(localEndpoint.secret)}
 geo-auto-update: false
@@ -210,9 +211,17 @@ proxy-providers:
 proxies: []
 
 proxy-groups:
+  - name: 自动选择
+    type: url-test
+    use:
+      - subscription
+    url: https://www.gstatic.com/generate_204
+    interval: 600
+    tolerance: 50
   - name: PROXY
     type: select
     proxies:
+      - 自动选择
       - DIRECT
     use:
       - subscription
@@ -273,14 +282,11 @@ ${directRule}  - MATCH,PROXY
 
   async function applyRuntimeConfig(payload) {
     const response = await fetchWithTimeout(
-      `${backendURL}/configs?force=true`,
+      `${backendURL}/_fnos/config`,
       {
-        method: "PUT",
+        method: "POST",
         headers: controllerAuthHeaders(true),
-        body: JSON.stringify({
-          path: "",
-          payload,
-        }),
+        body: JSON.stringify({ payload }),
       },
       runtimeConfigTimeoutMs,
     )
@@ -600,7 +606,7 @@ ${directRule}  - MATCH,PROXY
       '<div class="clash-meta-subscription-tool__panel">',
       '<form class="clash-meta-subscription-tool__body">',
       '<h2 id="clash-meta-subscription-tool-title" class="clash-meta-subscription-tool__title">配置订阅</h2>',
-      '<p class="clash-meta-subscription-tool__desc">支持 http(s) 订阅和 clash://install-config 链接。这里会生成并加载当前运行时配置，不进入 MetaCubeXD 的空配置文件页；此操作不会写回飞牛应用文件里的 config.yaml。</p>',
+      '<p class="clash-meta-subscription-tool__desc">支持 http(s) 订阅和 clash://install-config 链接。应用后会写入飞牛应用文件里的 config.yaml，并立即让 mihomo 重新加载。</p>',
       '<label class="clash-meta-subscription-tool__label" for="clash-meta-subscription-tool-url">订阅 / 导入链接</label>',
       '<input id="clash-meta-subscription-tool-url" class="clash-meta-subscription-tool__input" type="text" inputmode="url" autocomplete="off" placeholder="https://... 或 clash://install-config?url=..." />',
       '<p class="clash-meta-subscription-tool__error" aria-live="polite"></p>',
@@ -656,10 +662,10 @@ ${directRule}  - MATCH,PROXY
         clearLegacySubscriptionState()
         overlay.remove()
         routeToProxies()
-        showImportHint("运行时配置已加载。此按钮不会写回 config.yaml；若要永久保存，请在安装向导填写订阅，或手动更新应用文件里的 config.yaml 后重启。")
+        showImportHint("配置已写入 config.yaml 并加载，重启应用后仍然保留。")
       } catch (applyError) {
         error.textContent = getErrorMessage(applyError)
-        showImportHint("运行时配置没有及时加载完成，按钮已恢复。请检查 NAS 是否能直连访问订阅地址，或使用安装向导 / config.yaml 写入持久配置。", "error")
+        showImportHint("配置没有写入或加载成功，旧配置已保留。请检查订阅地址和 mihomo 日志。", "error")
         setSubmitState(submitButton, false)
       }
     })

@@ -34,7 +34,7 @@
       },
       {
         "type": "tips",
-        "helpText": "“删除其他数据”会保留 config.yaml、secret、订阅 provider 和安装向导保存的订阅/配置 URL，只清理运行缓存、临时文件和旧日志；“删除全部应用数据”会删除 Clash.Meta 的整个应用文件目录。"
+        "helpText": "“删除其他数据”会保留 config.yaml、secret、订阅 provider 和安装向导保存的订阅/配置 URL，只清理运行缓存、临时文件和旧日志；“删除全部应用数据”会删除 Clash.Meta 的应用文件与 fnOS 私有数据目录。"
       }
     ]
   }

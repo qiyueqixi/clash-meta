@@ -23,15 +23,27 @@ get_share_dir() {
 }
 
 APP_SHARE="$(get_share_dir)"
+case "${APP_SHARE}" in
+*/@appshare/clash.meta|*/@appdata/clash.meta/share|/var/apps/clash.meta/shares/clash.meta|/var/apps/clash.meta/var/share)
+    ;;
+*)
+    echo "unsafe application share path: ${APP_SHARE}" >&2
+    exit 1
+    ;;
+esac
 CONFIG_DIR="${APP_SHARE}/config"
 LOG_DIR="${APP_SHARE}/logs"
 RUN_DIR="${APP_VAR}/run"
 BIN_DIR="${APP_VAR}/bin"
 RUNTIME_DASHBOARD_DIR="${APP_VAR}/dashboard"
 PID_FILE="${RUN_DIR}/mihomo.pid"
+GATEWAY_PID_FILE="${RUN_DIR}/gateway.pid"
+GATEWAY_SOCKET="${APP_HOME}/clash-meta.sock"
 LOG_FILE="${LOG_DIR}/mihomo.log"
 SOURCE_BIN="${APP_HOME}/mihomo"
 BIN="${BIN_DIR}/mihomo"
+SOURCE_GATEWAY_BIN="${APP_HOME}/gateway-proxy"
+GATEWAY_BIN="${BIN_DIR}/gateway-proxy"
 CONFIG_FILE="${CONFIG_DIR}/config.yaml"
 SECRET_FILE="${CONFIG_DIR}/secret"
 TEMPLATE_FILE="${APP_HOME}/config.default.yaml"
@@ -239,7 +251,7 @@ bind-address: "*"
 mode: rule
 log-level: info
 ipv6: false
-external-controller: 0.0.0.0:9090
+external-controller: 127.0.0.1:9090
 external-ui: dashboard
 secret: ""
 geo-auto-update: false
@@ -281,9 +293,17 @@ proxy-providers:
 proxies: []
 
 proxy-groups:
+  - name: 自动选择
+    type: url-test
+    use:
+      - subscription
+    url: https://www.gstatic.com/generate_204
+    interval: 600
+    tolerance: 50
   - name: PROXY
     type: select
     proxies:
+      - 自动选择
       - DIRECT
     use:
       - subscription
@@ -636,7 +656,7 @@ ensure_config_runtime_settings() {
             geo_auto_update = 0
         }
         /^[[:space:]]*external-controller[[:space:]]*:/ {
-            print "external-controller: 0.0.0.0:9090"
+            print "external-controller: 127.0.0.1:9090"
             external_controller = 1
             next
         }
@@ -659,7 +679,7 @@ ensure_config_runtime_settings() {
         { print }
         END {
             if (external_controller == 0) {
-                print "external-controller: 0.0.0.0:9090"
+                print "external-controller: 127.0.0.1:9090"
             }
             if (external_ui == 0) {
                 print "external-ui: dashboard"
@@ -963,6 +983,12 @@ prepare_binary() {
 
     cp "${SOURCE_BIN}" "${BIN}" >> "${LOG_FILE}" 2>&1 || return 1
     chmod 755 "${BIN}" >> "${LOG_FILE}" 2>&1 || return 1
+    if [ ! -f "${SOURCE_GATEWAY_BIN}" ]; then
+        log_msg "source gateway binary does not exist: ${SOURCE_GATEWAY_BIN}"
+        return 1
+    fi
+    cp "${SOURCE_GATEWAY_BIN}" "${GATEWAY_BIN}" >> "${LOG_FILE}" 2>&1 || return 1
+    chmod 755 "${GATEWAY_BIN}" >> "${LOG_FILE}" 2>&1 || return 1
     return 0
 }
 
@@ -971,16 +997,23 @@ is_running_pid() {
     [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
 }
 
-status_process() {
-    if [ -f "${PID_FILE}" ]; then
+status_pid_file() {
+    local pid_file="$1"
+    if [ -f "${pid_file}" ]; then
         local pid
-        pid="$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')"
+        pid="$(head -n 1 "${pid_file}" | tr -d '[:space:]')"
         if is_running_pid "${pid}"; then
             return 0
         fi
-        rm -f "${PID_FILE}"
+        rm -f "${pid_file}"
     fi
     return 3
+}
+
+status_process() {
+    status_pid_file "${PID_FILE}" || return 3
+    status_pid_file "${GATEWAY_PID_FILE}" || return 3
+    [ -S "${GATEWAY_SOCKET}" ] || return 3
 }
 
 start_process() {
@@ -988,6 +1021,7 @@ start_process() {
         log_msg "${APP_NAME} is already running"
         return 0
     fi
+    stop_process
 
     if ! prepare_dirs; then
         log_msg "failed to prepare runtime directories"
@@ -1013,28 +1047,47 @@ start_process() {
     echo "$!" > "${PID_FILE}"
     sleep 2
 
+    if ! status_pid_file "${PID_FILE}"; then
+        log_msg "failed to start mihomo before gateway startup"
+        write_temp_log
+        return 1
+    fi
+
+    rm -f "${GATEWAY_SOCKET}" 2>/dev/null || true
+    "${GATEWAY_BIN}" \
+        -socket "${GATEWAY_SOCKET}" \
+        -prefix "/app/clash-meta" \
+        -target "http://127.0.0.1:9090" \
+        -config "${CONFIG_FILE}" \
+        -secret-file "${SECRET_FILE}" >> "${LOG_FILE}" 2>&1 &
+    echo "$!" > "${GATEWAY_PID_FILE}"
+    sleep 1
+
     if status_process; then
         return 0
     fi
 
     log_msg "failed to start ${APP_NAME}"
     write_temp_log
+    stop_process
     return 1
 }
 
-stop_process() {
-    if [ ! -f "${PID_FILE}" ]; then
+stop_pid_file() {
+    local pid_file="$1"
+    local label="$2"
+    if [ ! -f "${pid_file}" ]; then
         return 0
     fi
 
     local pid
-    pid="$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')"
+    pid="$(head -n 1 "${pid_file}" | tr -d '[:space:]')"
     if ! is_running_pid "${pid}"; then
-        rm -f "${PID_FILE}"
+        rm -f "${pid_file}"
         return 0
     fi
 
-    log_msg "stopping ${APP_NAME} pid=${pid}"
+    log_msg "stopping ${label} pid=${pid}"
     kill -TERM "${pid}" >> "${LOG_FILE}" 2>&1 || true
 
     local count=0
@@ -1046,8 +1099,14 @@ stop_process() {
     if is_running_pid "${pid}"; then
         kill -KILL "${pid}" >> "${LOG_FILE}" 2>&1 || true
     fi
-    rm -f "${PID_FILE}"
+    rm -f "${pid_file}"
     return 0
+}
+
+stop_process() {
+    stop_pid_file "${GATEWAY_PID_FILE}" "clash.meta gateway"
+    rm -f "${GATEWAY_SOCKET}" 2>/dev/null || true
+    stop_pid_file "${PID_FILE}" "${APP_NAME}"
 }
 
 case "$1" in

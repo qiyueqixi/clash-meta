@@ -1,140 +1,111 @@
-# fnOS Clash.Meta 原生应用包
+# fnOS Clash.Meta 安装与使用
 
-本项目产出的是飞牛 fnOS 应用中心可安装的原生 Native 应用包，不是 Docker 包。包内置 mihomo 核心、MetaCubeXD Web 面板和 geodata，配置、日志、运行态文件按飞牛应用目录规范分开放置。
+## 安装包选择
 
-## 已构建版本
+- Intel / AMD 飞牛设备安装 `clash.meta_1.19.27-31_x86.fpk`。
+- ARM64 飞牛设备安装 `clash.meta_1.19.27-31_arm.fpk`。
+- 这是原生应用包，不需要安装 Docker。
 
-- 应用版本: `1.19.27-29`
-- mihomo 核心: `v1.19.27`
-- 内嵌 Web 面板: `MetaCubeXD v1.258.3`
-- 打包方式: `scripts/build-fpk.py` 手工 tar 打包，显式保留 Linux 执行权限
+## 首次安装
 
-## 产物
+飞牛先显示协议许可，随后显示“首次配置”。同一页有两个输入框，二选一：
 
-构建产物位于 `dist/`:
+1. `订阅 / 导入链接`
 
-- `clash.meta_1.19.27-29_x86.fpk`: 飞牛 x86 平台使用
-- `clash.meta_1.19.27-29_arm.fpk`: 飞牛 ARM 平台使用
-- `SHA256SUMS.txt`: 包校验值
+   可填写普通 `http(s)` 订阅，或小猫咪生成的 `clash://install-config?url=...&name=...`。
 
-当前 SHA256:
+2. `完整 YAML 配置 URL`
 
-```text
-2CA11C3A3B1876E9F77D8FAE36E442590810CC294C933743FEC989AF6A4CDA59  clash.meta_1.19.27-29_x86.fpk
-814CFCAE9829026862E364C730DF4F6E9C30534FB5CC6C6BC3D1987E979305F3  clash.meta_1.19.27-29_arm.fpk
-```
+   只填写可直接作为 mihomo `config.yaml` 使用的完整 YAML 地址。两个框都填时优先使用此项。
 
-## 安装向导
+两个框都留空时使用最小默认配置。安装向导不会要求 controller token，应用会首次启动时自动生成。
 
-安装时仍会先显示飞牛标准“协议许可”页。继续下一步后，本包会显示中文安装向导:
+订阅模式生成的配置包含：
 
-1. `首次配置`: 同一页提供 `订阅 / 导入链接` 和 `完整 YAML 配置 URL` 两个输入框。
+- provider 每 `86400` 秒自动更新一次。
+- provider 下载走 `DIRECT`。
+- provider 启动测速默认关闭，避免首次启动被网络质量拖死。
+- `自动选择` 使用 `url-test`，每 600 秒检测一次。
+- `PROXY` 默认选择 `自动选择`，也可以在面板手动选择节点或 `DIRECT`。
 
-填写规则:
+## 打开应用
 
-- `订阅 / 导入链接`: 普通 Clash/Mihomo 订阅填这里；小猫咪复制出的 `clash://install-config?url=...&name=...` 链接也填这里。首次启动会生成 `proxy-providers.subscription` 配置，provider 下载固定走 `DIRECT`，默认关闭 provider health-check，并给订阅域名加直连规则；普通流量仍默认 `MATCH,PROXY`。
-- `完整 YAML 配置 URL`: 只有可直接作为 mihomo `config.yaml` 使用的完整 YAML 配置地址才填这里。首次启动会尝试下载；下载失败会回退到默认配置，不让应用卡在“启用中”。
-- 两个都填时优先使用 `完整 YAML 配置 URL`。
-- 两个都留空时，首次启动复制包内默认配置，规则为 `MATCH,DIRECT`。
-
-内嵌 Web 不再自动弹出订阅配置，避免和安装向导重复。需要临时新增或替换订阅时，打开应用后点击右下角 `配置` 按钮，粘贴普通订阅或 `clash://install-config?url=...&name=...` 导入链接。这个按钮是本包额外加的，不是 MetaCubeXD 原生按钮；它会生成一份运行时 mihomo 配置并调用 `/configs?force=true` 加载，不再进入 MetaCubeXD 的 `Profiles` 空配置文件页。从 `1.19.27-27` 开始，配置请求有 30 秒超时，超时后按钮会恢复，不会一直停在“正在加载...”。从 `1.19.27-28` 开始，按钮文案改为 `配置`，弹窗标题改为 `配置订阅`，避免和 MetaCubeXD 原生“导入配置”概念混淆。
-
-注意: 右下角 `配置` 只保证当前运行时加载配置，不保证把配置永久写回 `<应用文件>/clash.meta/config/config.yaml`。超时不一定表示链接格式错误，也可能是 NAS 直连订阅域名慢或失败。需要长期保存订阅时，建议卸载重装时在安装向导填写订阅，或手动编辑 `config.yaml` 后重启应用。
-
-## 卸载向导
-
-卸载时会显示中文卸载向导，默认 `保留全部用户数据（推荐）`。
-
-可选项:
-
-- `保留全部用户数据（推荐）`: 不删除应用文件目录，保留 `config.yaml`、`secret`、订阅缓存和日志。
-- `删除其他数据，保留用户配置与订阅`: 删除运行缓存、临时文件和旧日志，保留 `config.yaml`、`secret`、订阅 provider 和安装向导保存的订阅/配置 URL。
-- `删除全部应用数据`: 删除整个 `<应用文件>/clash.meta` 应用文件目录。
-
-## 安装后入口
-
-应用中心“打开”按钮会打开内嵌 MetaCubeXD 面板。也可以直接访问:
+从飞牛桌面图标或应用中心的“打开”按钮进入。入口通过统一网关访问：
 
 ```text
-http://<飞牛IP>:9090/ui/
+/app/clash-meta/ui/
 ```
 
-首次打开 MetaCubeXD 正常会自动连接本机后端，不需要手动填写密钥。如果仍出现“后端地址 / 密钥”页面:
+不要填写或访问 `http://<飞牛IP>:9090`。从 `1.19.27-30` 开始，控制器只监听 NAS 本机 `127.0.0.1:9090`，由 fnOS 网关完成登录校验和转发。
 
-- 后端地址填 `http://<飞牛IP>:9090`
-- 密钥填 `<应用文件>/clash.meta/config/secret` 里的值
-- 如果只是旧窗口缓存导致，刷新或清理 `http://<飞牛IP>:9090` 的站点数据后重开应用
+## 修改订阅
 
-如果启用成功但桌面没有图标或应用中心没有“打开”按钮:
+有两种持久化方式：
 
-- 确认安装的是 `1.19.27-29`。
-- 先卸载旧包再安装新包，避免入口元数据缓存。
-- 非管理员用户看不到入口时，需要由管理员授权；本包默认不对所有用户开放控制面板入口。
+- 在内嵌页右下角点击“配置”，填写订阅并提交。系统先备份旧配置，再原子写入 `config.yaml` 并热加载；失败会恢复旧配置。
+- 在飞牛应用设置中打开“更新配置”，填写订阅或完整 YAML URL。全部留空表示不修改。提交后服务会重启验证，失败恢复原配置。
 
-## 应用文件目录
+也可以手工编辑：
 
-首次启动后，配置和日志位于飞牛“应用文件”目录:
+```text
+<应用文件>/clash.meta/config/config.yaml
+```
+
+手工编辑后在应用中心重启应用。
+
+自动备份文件：
+
+- `config.yaml.bak`: 内嵌页“配置”提交前的备份。
+- `config.yaml.settings-backup`: 飞牛应用设置提交前的备份。
+
+订阅地址通常包含私有 token，不要把 `config.yaml`、向导保存目录、截图或日志公开上传。
+
+## 网络使用方式
+
+应用不会默认接管整个 NAS 或局域网。默认提供显式代理：
+
+- HTTP / SOCKS mixed: `<飞牛IP>:7899`
+- DNS: `<飞牛IP>:1053`
+
+需要使用代理的设备或应用手工填写 `7899`。配置中没有启用 TUN，因此未配置代理的流量仍按原网络出口访问。
+
+## 应用文件
 
 ```text
 <应用文件>/clash.meta/config/config.yaml
 <应用文件>/clash.meta/config/secret
+<应用文件>/clash.meta/config/providers/
+<应用文件>/clash.meta/config/wizard/
 <应用文件>/clash.meta/logs/mihomo.log
 ```
 
-向导选择会保存到:
+geodata 也会复制到 `config/`。它们由安装包内置，默认不在线更新。
+
+## 卸载
+
+- `保留全部用户数据（推荐）`: 保留配置、订阅、provider、日志和缓存。
+- `删除其他数据，保留用户配置与订阅`: 保留配置、secret、provider 和向导地址，删除缓存、临时文件和旧日志。
+- `删除全部应用数据`: 停止服务后删除 Clash.Meta 的应用文件目录，以及 fnOS 为此应用创建的 `@appdata`、`@apphome`、`@appconf`、`@appmeta` 和 `@apptemp` 私有目录。
+
+## 排障
+
+应用卡在启用或打不开时，先查看：
 
 ```text
-<应用文件>/clash.meta/config/wizard/
+<应用文件>/clash.meta/logs/mihomo.log
 ```
 
-修改 `config.yaml` 后，需要在飞牛应用中心重启应用。
+正常启动应看到：
 
-## 内置 geodata
-
-包内置:
-
-- `country.mmdb`
-- `geoip.metadb`
-- `geoip.dat`
-- `geosite.dat`
-
-启动时会复制到应用文件配置目录，并默认关闭 geodata 自动更新，避免首次启动或规则加载阶段因访问 GitHub 超时失败。
-
-后续维护规则:
-
-- 包内 geodata 不做自动更新。
-- 下次需要维护者在构建机手动下载新的 `country.mmdb`、`geoip.metadb`、`geoip.dat` 和 `geosite.dat`。
-- 更新后必须重打 `.fpk` 包并重新安装或发布。
-- 具体命令写在 `MAINTENANCE.md` 的“手动更新 geodata”章节。
-
-## 默认端口
-
-- HTTP/SOCKS mixed proxy: `7899`
-- External controller / Web UI: `9090`
-- DNS listen: `1053`
-
-## 安全说明
-
-- 默认 `allow-lan: true`，局域网设备可以连接 `7899` 和 `9090`。
-- 首次启动会自动生成 controller secret，写入 `<应用文件>/clash.meta/config/secret` 和 `config.yaml`。
-- 内嵌 MetaCubeXD 会自动带上这个 secret，正常不需要手动填写密钥。
-- 这个 secret 会出现在运行时 Web 配置里，能访问 `9090/ui/` 的人仍可能读到它。
-- 如果用飞牛公共网关或反向代理对外访问，外层必须有飞牛网关鉴权或等价访问控制。
-
-## 验证
-
-安装并启动后，在飞牛或同局域网机器上检查:
-
-```bash
-curl http://<飞牛IP>:9090/version
-curl http://<飞牛IP>:9090/ui/
+```text
+RESTful API listening at: 127.0.0.1:9090
+Mixed(http+socks) proxy listening at: [::]:7899
+fnOS gateway listening on .../clash-meta.sock
 ```
 
-如果面板无法打开，优先检查:
+常见问题：
 
-- 应用是否处于运行状态
-- `9090` 是否被其他服务占用
-- 防火墙是否阻止访问
-- 日志文件 `<应用文件>/clash.meta/logs/mihomo.log`
-- 应用中心入口是否来自 `1.19.27-29` 包
-- `geodata/` 是否随包内置
+- `context deadline exceeded`: 订阅地址或 DNS 不能直连；包内 geodata 本身不需要下载。
+- `mihomo rejected config`: 新配置语法或字段有误，检查日志和自动备份。
+- 应用运行但没有“打开”: 确认安装 `1.19.27-31`，必要时卸载旧包后重新安装以刷新入口元数据。
+- 统一网关返回 502: mihomo 未启动或本机 9090 冲突，检查同一日志中的前置错误。

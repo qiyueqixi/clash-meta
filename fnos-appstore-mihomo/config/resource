@@ -2,14 +2,8 @@
   "data-share": {
     "shares": [
       {
-        "name": "clash.meta",
-        "permission": {
-          "rw": [
-            "clash.meta"
-          ]
-        }
+        "name": "clash.meta"
       }
     ]
-  },
-  "systemd-unit": {}
+  }
 }

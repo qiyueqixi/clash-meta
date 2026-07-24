@@ -29,6 +29,14 @@ log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" >> "${LOG_DIR}/mihomo.log" 2>/dev/null || true
 }
 
+report_msg() {
+    local message="$*"
+    printf '%s\n' "${message}" >&2
+    if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+        printf '%s\n' "${message}" >> "${TRIM_TEMP_LOGFILE}" 2>/dev/null || true
+    fi
+}
+
 trim_value() {
     printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
@@ -46,7 +54,7 @@ safe_remove_path() {
     [ -n "${target}" ] || return 0
     case "${target}" in
     "${APP_SHARE}"|"${APP_SHARE}/"*)
-        rm -rf "${target}" 2>/dev/null || true
+        rm -rf -- "${target}" 2>/dev/null || return 1
         ;;
     *)
         log_msg "refuse to remove path outside app share: ${target}"
@@ -83,6 +91,57 @@ safe_delete_all() {
     safe_remove_path "${APP_SHARE}"
 }
 
+remove_private_data_roots() {
+    local resolved_app_var=""
+    local volume_root=""
+    local target=""
+
+    resolved_app_var="$(readlink -f "${APP_VAR}" 2>/dev/null || printf '%s' "${APP_VAR}")"
+    case "${resolved_app_var}" in
+    */@appdata/clash.meta)
+        volume_root="${resolved_app_var%/@appdata/clash.meta}"
+        ;;
+    /var/apps/clash.meta/var)
+        safe_remove_runtime_path "${APP_VAR}/wizard"
+        return 0
+        ;;
+    *)
+        report_msg "Skip private data cleanup for unexpected APP_VAR: ${APP_VAR} (${resolved_app_var})"
+        return 1
+        ;;
+    esac
+
+    case "${volume_root}" in
+    ""|"/"|"/usr"|"/usr/local"|"/usr/local/apps"|"/var"|"/var/apps")
+        report_msg "Refuse unsafe private data volume root: ${volume_root}"
+        return 1
+        ;;
+    esac
+
+    for target in \
+        "${volume_root}/@appdata/clash.meta" \
+        "${volume_root}/@apphome/clash.meta" \
+        "${volume_root}/@appconf/clash.meta" \
+        "${volume_root}/@appmeta/clash.meta" \
+        "${volume_root}/@apptemp/clash.meta" \
+        "${volume_root}/@appshare/clash.meta"; do
+        case "${target}" in
+        "${volume_root}"/@appdata/clash.meta|\
+        "${volume_root}"/@apphome/clash.meta|\
+        "${volume_root}"/@appconf/clash.meta|\
+        "${volume_root}"/@appmeta/clash.meta|\
+        "${volume_root}"/@apptemp/clash.meta|\
+        "${volume_root}"/@appshare/clash.meta)
+            [ ! -e "${target}" ] || rm -rf -- "${target}" || return 1
+            ;;
+        *)
+            report_msg "Refuse unexpected private data path: ${target}"
+            return 1
+            ;;
+        esac
+    done
+}
+
 delete_other_data_keep_config_subscription() {
     safe_remove_path "${CONFIG_DIR}/cache.db" || return 1
     safe_remove_path "${CONFIG_DIR}/cache.db-shm" || return 1
@@ -90,7 +149,7 @@ delete_other_data_keep_config_subscription() {
     safe_remove_path "${APP_SHARE}/cache" || return 1
     safe_remove_path "${APP_SHARE}/tmp" || return 1
     safe_remove_path "${LOG_DIR}" || return 1
-    log_msg "runtime data removed; config.yaml, secret, providers, subscription files, and wizard values preserved"
+    report_msg "Runtime data removed; config.yaml, secret, providers, subscription files, and wizard values preserved"
 }
 
 action="$(trim_value "$(get_wizard_env_value "wizard_uninstall_data_action")")"
@@ -107,7 +166,15 @@ delete_other_data_keep_config_subscription|delete_subscription_cache)
     ;;
 delete_all)
     log_msg "uninstall requested; deleting all app data"
-    safe_delete_all
+    if ! safe_delete_all; then
+        report_msg "Failed to delete the Clash.Meta application share"
+        exit 1
+    fi
+    if ! remove_private_data_roots; then
+        report_msg "Shared data was deleted, but private application data cleanup failed"
+        exit 1
+    fi
+    report_msg "All Clash.Meta shared and private application data cleanup completed"
     ;;
 *)
     log_msg "unknown uninstall data action ${action}; keeping all user data"

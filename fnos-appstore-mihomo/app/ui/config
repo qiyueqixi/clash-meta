@@ -5,9 +5,10 @@
       "desc": "Clash.Meta mihomo core with built-in MetaCubeXD web dashboard.",
       "icon": "images/{0}.png",
       "type": "iframe",
-      "protocol": "http",
-      "port": "9090",
-      "url": "/ui/",
+      "protocol": "",
+      "gatewayPrefix": "/app/clash-meta",
+      "gatewaySocket": "clash-meta.sock",
+      "url": "/app/clash-meta/ui/",
       "allUsers": false,
       "noDisplay": false
     }

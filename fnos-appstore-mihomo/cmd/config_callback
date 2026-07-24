@@ -1,5 +1,93 @@
 #!/bin/bash
 
-### This script is called after the user change environment variables in application setting page.
+APP_NAME="clash.meta"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+APP_VAR="${TRIM_PKGVAR:-/var/apps/${APP_NAME}/var}"
 
-exit 0
+trim_value() {
+    printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+get_wizard_env_value() {
+    local key="$1"
+    local upper_key
+    upper_key="$(printf '%s' "${key}" | tr '[:lower:]' '[:upper:]')"
+    eval "printf '%s' \"\${${key}:-\${${upper_key}:-}}\""
+}
+
+get_share_dir() {
+    if [ -n "${TRIM_DATA_SHARE_PATHS:-}" ]; then
+        printf '%s' "${TRIM_DATA_SHARE_PATHS}" | tr ':' '\n' | while read -r item; do
+            [ -n "${item}" ] && printf '%s\n' "${item}" && break
+        done
+        return
+    fi
+    if [ -d "/var/apps/${APP_NAME}/shares/${APP_NAME}" ]; then
+        printf '%s\n' "/var/apps/${APP_NAME}/shares/${APP_NAME}"
+        return
+    fi
+    printf '%s\n' "${APP_VAR}/share"
+}
+
+write_error() {
+    local message="$1"
+    [ -z "${TRIM_TEMP_LOGFILE:-}" ] || printf '%s\n' "${message}" > "${TRIM_TEMP_LOGFILE}"
+    printf '%s\n' "${message}" >&2
+}
+
+subscription_url="$(trim_value "$(get_wizard_env_value wizard_subscription_url)")"
+config_url="$(trim_value "$(get_wizard_env_value wizard_config_url)")"
+if [ -z "${subscription_url}" ] && [ -z "${config_url}" ]; then
+    exit 0
+fi
+
+APP_SHARE="$(get_share_dir)"
+case "${APP_SHARE}" in
+*/@appshare/clash.meta|*/@appdata/clash.meta/share|/var/apps/clash.meta/shares/clash.meta|/var/apps/clash.meta/var/share)
+    ;;
+*)
+    write_error "应用文件路径异常，拒绝修改配置。"
+    exit 1
+    ;;
+esac
+CONFIG_FILE="${APP_SHARE}/config/config.yaml"
+BACKUP_FILE="${CONFIG_FILE}.settings-backup"
+
+case "${CONFIG_FILE}" in
+"${APP_SHARE}/config/config.yaml") ;;
+*)
+    write_error "配置路径校验失败，拒绝修改。"
+    exit 1
+    ;;
+esac
+
+if [ -f "${CONFIG_FILE}" ]; then
+    cp -f "${CONFIG_FILE}" "${BACKUP_FILE}" || {
+        write_error "无法备份当前 config.yaml，配置未修改。"
+        exit 1
+    }
+fi
+
+"${SCRIPT_DIR}/install_callback" || {
+    write_error "无法保存配置向导内容，配置未修改。"
+    exit 1
+}
+"${SCRIPT_DIR}/main" stop >/dev/null 2>&1 || true
+rm -f "${CONFIG_FILE}"
+
+if "${SCRIPT_DIR}/main" start; then
+    exit 0
+fi
+
+"${SCRIPT_DIR}/main" stop >/dev/null 2>&1 || true
+if [ -f "${BACKUP_FILE}" ]; then
+    cp -f "${BACKUP_FILE}" "${CONFIG_FILE}"
+    if "${SCRIPT_DIR}/main" start; then
+        write_error "新配置启动失败，已经恢复并重新启用原配置。"
+    else
+        write_error "新配置启动失败，原配置已恢复，但服务重新启动失败，请查看 mihomo.log。"
+    fi
+else
+    write_error "新配置启动失败，并且没有可恢复的旧配置，请查看 mihomo.log。"
+fi
+exit 1

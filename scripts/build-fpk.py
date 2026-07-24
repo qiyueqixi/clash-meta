@@ -5,6 +5,8 @@ import hashlib
 import io
 import json
 import os
+import shutil
+import subprocess
 import tarfile
 from pathlib import Path
 
@@ -18,6 +20,52 @@ PLATFORM_BINARIES = {
     "x86": ROOT / ".tmp" / "downloads" / "mihomo-linux-amd64-compatible",
     "arm": ROOT / ".tmp" / "downloads" / "mihomo-linux-arm64",
 }
+
+PLATFORM_GATEWAY_BINARIES = {
+    "x86": ROOT / ".tmp" / "downloads" / "gateway-proxy-linux-amd64",
+    "arm": ROOT / ".tmp" / "downloads" / "gateway-proxy-linux-arm64",
+}
+
+
+def find_go() -> Path | None:
+    executable = "go.exe" if os.name == "nt" else "go"
+    candidates = (
+        ROOT / ".tmp" / "go-full" / "go" / "bin" / executable,
+        ROOT / ".tmp" / "go" / "bin" / executable,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    system_go = shutil.which("go")
+    return Path(system_go) if system_go else None
+
+
+def ensure_gateway_binaries() -> None:
+    go = find_go()
+    missing = [path for path in PLATFORM_GATEWAY_BINARIES.values() if not path.is_file()]
+    if go is None:
+        if missing:
+            raise RuntimeError(
+                "Go is required to build the fnOS gateway proxy and no cached binary exists. "
+                "Install Go 1.22+ or extract it under .tmp/go-full/go."
+            )
+        return
+
+    for platform, output in PLATFORM_GATEWAY_BINARIES.items():
+        output.parent.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        env.update({"CGO_ENABLED": "0", "GOOS": "linux"})
+        if platform == "x86":
+            env.update({"GOARCH": "amd64", "GOAMD64": "v1"})
+        else:
+            env.update({"GOARCH": "arm64"})
+            env.pop("GOAMD64", None)
+        subprocess.run(
+            [str(go), "build", "-trimpath", "-ldflags=-s -w", "-o", str(output), "./scripts/gateway-proxy"],
+            cwd=ROOT,
+            env=env,
+            check=True,
+        )
 
 
 def sha256(path: Path) -> str:
@@ -127,6 +175,15 @@ def validate_entry() -> None:
     if manifest.get("install_type") == "root":
         raise RuntimeError("install_type=root is not allowed for this third-party native package")
 
+    for script_path in sorted((SOURCE_DIR / "cmd").iterdir()):
+        if not script_path.is_file():
+            continue
+        script_data = script_path.read_bytes()
+        if not script_data.startswith(b"#!/bin/bash\n"):
+            raise RuntimeError(f"{script_path} must start with an LF-terminated #!/bin/bash shebang")
+        if b"\r\n" in script_data:
+            raise RuntimeError(f"{script_path} contains CRLF line endings; fnOS lifecycle scripts must use LF")
+
     license_path = SOURCE_DIR / "LICENSE"
     third_party_notices = SOURCE_DIR / "app" / "THIRD_PARTY_NOTICES.md"
     if not license_path.is_file():
@@ -139,17 +196,14 @@ def validate_entry() -> None:
     run_as = privilege.get("defaults", {}).get("run-as")
     if run_as != "package":
         raise RuntimeError(f"{privilege_path} must use defaults.run-as=package, got {run_as!r}")
-    username = privilege.get("username", appname)
-
     resource_path = SOURCE_DIR / "config" / "resource"
     resource = json.loads(resource_path.read_text(encoding="utf-8"))
     shares = resource.get("data-share", {}).get("shares", [])
     app_share = next((share for share in shares if share.get("name") == appname), None)
     if app_share is None:
         raise RuntimeError(f"{resource_path} must declare data-share named {appname}")
-    rw_users = app_share.get("permission", {}).get("rw", [])
-    if username not in rw_users:
-        raise RuntimeError(f"{resource_path} must grant rw permission for {username}")
+    if "systemd-unit" in resource:
+        raise RuntimeError(f"{resource_path} must not declare an unused systemd-unit resource")
 
     config_path = SOURCE_DIR / "app" / ui_dir / "config"
     config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -167,6 +221,14 @@ def validate_entry() -> None:
         raise RuntimeError("desktop entry must set allUsers=false because the dashboard controls mihomo")
     if entry.get("type") not in {"url", "iframe"}:
         raise RuntimeError("desktop entry type must be url or iframe")
+    if entry.get("gatewayPrefix") != "/app/clash-meta":
+        raise RuntimeError("desktop entry must use gatewayPrefix=/app/clash-meta")
+    if entry.get("gatewaySocket") != "clash-meta.sock":
+        raise RuntimeError("desktop entry must use gatewaySocket=clash-meta.sock")
+    if entry.get("url") != "/app/clash-meta/ui/":
+        raise RuntimeError("desktop entry must open /app/clash-meta/ui/")
+    if "port" in entry:
+        raise RuntimeError("unified gateway desktop entry must not declare a port")
 
     icon_pattern = entry.get("icon", "")
     for size in ("64", "256"):
@@ -194,7 +256,7 @@ def validate_entry() -> None:
     default_config_text = default_config_path.read_text(encoding="utf-8")
     for required_text in (
         "mixed-port: 7899",
-        "external-controller: 0.0.0.0:9090",
+        "external-controller: 127.0.0.1:9090",
         "external-ui: dashboard",
         "geo-auto-update: false",
         "    - 223.5.5.5",
@@ -245,6 +307,14 @@ def validate_entry() -> None:
         if required_text not in wizard_uninstall_text:
             raise RuntimeError(f"{wizard_uninstall} is missing {required_text!r}")
 
+    wizard_config = SOURCE_DIR / "wizard" / "config"
+    if not wizard_config.is_file():
+        raise RuntimeError(f"missing native config wizard: {wizard_config}")
+    wizard_config_text = json.dumps(json.loads(wizard_config.read_text(encoding="utf-8")), ensure_ascii=False)
+    for required_text in ("更新配置", "wizard_subscription_url", "wizard_config_url", "全部留空表示不修改"):
+        if required_text not in wizard_config_text:
+            raise RuntimeError(f"{wizard_config} is missing {required_text!r}")
+
     dashboard_config = SOURCE_DIR / "app" / "dashboard" / "config.js"
     dashboard_config_text = dashboard_config.read_text(encoding="utf-8")
     for required_text in (
@@ -261,11 +331,11 @@ def validate_entry() -> None:
         "buildSubscriptionConfig(",
         "applyRuntimeConfig(",
         "fetchWithTimeout(",
-        "/configs?force=true",
+        "/_fnos/config",
         "配置订阅",
         "应用配置",
         "加载配置超时",
-        "运行时配置已加载",
+        "配置已写入 config.yaml 并加载",
     ):
         if required_text not in dashboard_config_text:
             raise RuntimeError(f"{dashboard_config} is missing {required_text!r}")
@@ -309,6 +379,9 @@ def validate_entry() -> None:
         "RUNTIME_DASHBOARD_DIR=",
         "configured_by_install_wizard",
         "-ext-ui \"${DASHBOARD_DIR}\"",
+        "GATEWAY_SOCKET=",
+        "SOURCE_GATEWAY_BIN=",
+        "-prefix \"/app/clash-meta\"",
     ):
         if required_text not in cmd_main_text:
             raise RuntimeError(f"{cmd_main} is missing {required_text!r}")
@@ -339,6 +412,12 @@ def validate_entry() -> None:
         if required_text not in install_callback_text:
             raise RuntimeError(f"{install_callback} is missing {required_text!r}")
 
+    config_callback = SOURCE_DIR / "cmd" / "config_callback"
+    config_callback_text = config_callback.read_text(encoding="utf-8")
+    for required_text in ("settings-backup", "install_callback", '"${SCRIPT_DIR}/main" stop', '"${SCRIPT_DIR}/main" start'):
+        if required_text not in config_callback_text:
+            raise RuntimeError(f"{config_callback} is missing {required_text!r}")
+
     uninstall_callback = SOURCE_DIR / "cmd" / "uninstall_callback"
     uninstall_callback_text = uninstall_callback.read_text(encoding="utf-8")
     for required_text in (
@@ -346,12 +425,21 @@ def validate_entry() -> None:
         "delete_other_data_keep_config_subscription",
         "delete_subscription_cache",
         "safe_delete_all",
+        "remove_private_data_roots",
+        "readlink -f",
+        "@appdata/clash.meta",
+        "@appshare/clash.meta",
         "keep_all",
         "delete_all",
         "config.yaml, secret, providers, subscription files, and wizard values preserved",
     ):
         if required_text not in uninstall_callback_text:
             raise RuntimeError(f"{uninstall_callback} is missing {required_text!r}")
+
+    uninstall_init = SOURCE_DIR / "cmd" / "uninstall_init"
+    uninstall_init_text = uninstall_init.read_text(encoding="utf-8")
+    if '"${SCRIPT_DIR}/main" stop' not in uninstall_init_text:
+        raise RuntimeError(f"{uninstall_init} must stop the service before uninstall")
 
     version = manifest["version"]
     for html_name in ("index.html", "200.html", "404.html"):
@@ -360,6 +448,15 @@ def validate_entry() -> None:
         expected = f"config.js?v={version}"
         if expected not in html_text:
             raise RuntimeError(f"{html_path} is missing {expected!r}")
+
+    index_path = SOURCE_DIR / "app" / "dashboard" / "index.html"
+    service_worker_path = SOURCE_DIR / "app" / "dashboard" / "sw.js"
+    service_worker_text = service_worker_path.read_text(encoding="utf-8")
+    expected_revision = f'url:"./",revision:"{md5(index_path)}"'
+    if expected_revision not in service_worker_text:
+        raise RuntimeError(
+            f"{service_worker_path} does not contain the current index.html revision {expected_revision!r}"
+        )
 
 
 def validate_fpk(path: Path) -> None:
@@ -380,18 +477,27 @@ def validate_fpk(path: Path) -> None:
         app_data = app_member.read()
 
     with tarfile.open(fileobj=io.BytesIO(app_data), mode="r:gz") as app_tar:
-        app_names = set(app_tar.getnames())
+        app_members = {member.name: member for member in app_tar.getmembers()}
+        app_names = set(app_members)
     if "THIRD_PARTY_NOTICES.md" not in app_names:
         raise RuntimeError(f"{path} app.tgz is missing THIRD_PARTY_NOTICES.md")
+    for executable in ("mihomo", "gateway-proxy"):
+        member = app_members.get(executable)
+        if member is None:
+            raise RuntimeError(f"{path} app.tgz is missing {executable}")
+        if member.mode & 0o111 == 0:
+            raise RuntimeError(f"{path} app.tgz {executable} is not executable")
 
 
-def build_app_tgz(platform: str, binary_path: Path) -> Path:
+def build_app_tgz(platform: str, binary_path: Path, gateway_binary_path: Path) -> Path:
     app_source = SOURCE_DIR / "app"
     app_tgz = TMP_DIR / f"app-{platform}.tgz"
     app_tgz.parent.mkdir(parents=True, exist_ok=True)
 
     if not binary_path.is_file():
         raise FileNotFoundError(binary_path)
+    if not gateway_binary_path.is_file():
+        raise FileNotFoundError(gateway_binary_path)
 
     with tarfile.open(app_tgz, "w:gz", format=tarfile.PAX_FORMAT) as tar:
         for dirpath, dirnames, filenames in os.walk(app_source):
@@ -408,10 +514,13 @@ def build_app_tgz(platform: str, binary_path: Path) -> Path:
                 source = current / filename
                 if source == app_source / "mihomo":
                     continue
+                if source == app_source / "gateway-proxy":
+                    continue
                 relative = source.relative_to(app_source).as_posix()
                 add_path(tar, source, relative, 0o644)
 
         add_path(tar, binary_path, "mihomo", 0o755)
+        add_path(tar, gateway_binary_path, "gateway-proxy", 0o755)
 
     return app_tgz
 
@@ -447,10 +556,11 @@ def main() -> None:
     args = parser.parse_args()
 
     validate_entry()
+    ensure_gateway_binaries()
 
     outputs: list[Path] = []
     for platform, binary_path in PLATFORM_BINARIES.items():
-        app_tgz = build_app_tgz(platform, binary_path)
+        app_tgz = build_app_tgz(platform, binary_path, PLATFORM_GATEWAY_BINARIES[platform])
         out = build_fpk(platform, args.version, app_tgz)
         validate_fpk(out)
         outputs.append(out)

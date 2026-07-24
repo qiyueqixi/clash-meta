@@ -1,0 +1,11 @@
+fnos-appstore-mihomo/cmd/* text eol=lf
+fnos-appstore-mihomo/manifest text eol=lf
+fnos-appstore-mihomo/config/* text eol=lf
+fnos-appstore-mihomo/wizard/* text eol=lf
+fnos-appstore-mihomo/app/*.yaml text eol=lf
+fnos-appstore-mihomo/app/ui/config text eol=lf
+fnos-appstore-mihomo/app/dashboard/*.js text eol=lf
+scripts/*.py text eol=lf
+scripts/**/*.go text eol=lf
+go.mod text eol=lf
+*.md text eol=lf

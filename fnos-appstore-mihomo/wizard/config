@@ -1,0 +1,39 @@
+[
+  {
+    "stepTitle": "更新配置",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "下面两个输入框二选一填写。全部留空表示不修改当前配置；提交非空地址会替换 config.yaml，并保留一份更新前备份。"
+      },
+      {
+        "type": "text",
+        "field": "wizard_subscription_url",
+        "label": "订阅 / 导入链接",
+        "initValue": "",
+        "rules": [
+          {
+            "pattern": "^(|https?://.+|clash://install-config\\?.+)$",
+            "message": "订阅 / 导入链接必须以 http://、https:// 或 clash://install-config?url= 开头"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_config_url",
+        "label": "完整 YAML 配置 URL",
+        "initValue": "",
+        "rules": [
+          {
+            "pattern": "^(|https?://.+)$",
+            "message": "完整 YAML 配置 URL 必须以 http:// 或 https:// 开头"
+          }
+        ]
+      },
+      {
+        "type": "tips",
+        "helpText": "两个地址都填写时优先使用完整 YAML。更新成功后立即重启服务；更新失败会恢复原配置。"
+      }
+    ]
+  }
+]
