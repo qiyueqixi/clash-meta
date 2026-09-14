@@ -41,7 +41,7 @@ D:\clash-meta
 
 ```text
 appname=clash.meta
-version=1.19.27-32
+version=1.19.27-33
 platform=x86
 desktop_uidir=ui
 desktop_applaunchname=clash.meta.Application
@@ -496,7 +496,7 @@ app/dashboard/pwa-512x512.png -> ICON_256.PNG 和 app/ui/images/icon_256.png
 在 `D:\clash-meta` 执行。当前不要再直接用 Windows 版 `fnpack build` 产出最终包，因为它会丢 Unix 执行权限。正式构建使用:
 
 ```powershell
-python scripts\build-fpk.py --version 1.19.27-32
+python scripts\build-fpk.py --version 1.19.27-33
 ```
 
 网关 helper 需要 Go 1.22 或更新版本。打包器会优先寻找系统 `go`，也支持解压在 `.tmp/go-full/go/` 的便携工具链；找到 Go 时自动交叉编译 x86/ARM，最终 FPK 不包含 Go。没有 Go 时只有在 `.tmp/downloads/` 已存在两个缓存二进制才可继续。
