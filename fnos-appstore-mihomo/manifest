@@ -1,12 +1,12 @@
 appname=clash.meta
-version=1.19.27-31
+version=1.19.27-32
 display_name=Clash.Meta
 desc=Clash.Meta mihomo core with built-in MetaCubeXD web dashboard.
 platform=x86
 source=thirdparty
-maintainer=qiyueqixi
-maintainer_url=https://github.com/qiyueqixi/clash-meta
-distributor=qiyueqixi
+maintainer=MetaCubeX
+maintainer_url=https://github.com/MetaCubeX/mihomo
+distributor=Clash.Meta fnOS Community
 distributor_url=https://github.com/qiyueqixi/clash-meta
 os_min_version=1.2.0
 desktop_uidir=ui

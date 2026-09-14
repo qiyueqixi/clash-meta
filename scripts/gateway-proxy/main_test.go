@@ -37,8 +37,52 @@ func httputilProxy(target *url.URL, prefix string) *httputil.ReverseProxy {
 		original(req)
 		req.URL.Path = stripPrefix(req.URL.Path, prefix)
 		req.URL.RawPath = ""
+		// The test server uses the same controller-auth normalization as main.
 	}
 	return proxy
+}
+
+func newAuthTestServer(t *testing.T, backend *httptest.Server, secretFile string) *server {
+	t.Helper()
+	target, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &server{prefix: "/app/clash-meta", secretFile: secretFile, target: target, client: backend.Client()}
+	s.proxy = httputil.NewSingleHostReverseProxy(target)
+	original := s.proxy.Director
+	s.proxy.Director = func(req *http.Request) {
+		original(req)
+		req.URL.Path = stripPrefix(req.URL.Path, s.prefix)
+		s.applyControllerAuth(req)
+	}
+	return s
+}
+
+func TestProxyNormalizesControllerAuthAndToken(t *testing.T) {
+	tempDir := t.TempDir()
+	secretFile := filepath.Join(tempDir, "secret")
+	if err := os.WriteFile(secretFile, []byte("controller-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer controller-secret" {
+			t.Errorf("unexpected authorization: %q", r.Header.Get("Authorization"))
+		}
+		if r.URL.Query().Get("token") != "controller-secret" {
+			t.Errorf("unexpected token: %q", r.URL.Query().Get("token"))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+
+	s := newAuthTestServer(t, backend, secretFile)
+	request := httptest.NewRequest(http.MethodGet, "/app/clash-meta/logs?token=wrong-token&level=info", nil)
+	response := httptest.NewRecorder()
+	s.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("unexpected response status=%d body=%q", response.Code, response.Body.String())
+	}
 }
 
 func TestProxyStripsGatewayPrefix(t *testing.T) {

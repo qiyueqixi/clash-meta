@@ -85,6 +85,7 @@ func main() {
 		req.URL.Path = stripPrefix(req.URL.Path, prefix)
 		req.URL.RawPath = ""
 		req.Host = target.Host
+		s.applyControllerAuth(req)
 	}
 	s.proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
 		log.Printf("proxy error: %v", proxyErr)
@@ -99,6 +100,25 @@ func main() {
 	log.Printf("fnOS gateway listening on %s, prefix=%s", socketPath, prefix)
 	if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
+	}
+}
+
+// Normalize controller authentication for API and WebSocket requests.
+func (s *server) applyControllerAuth(req *http.Request) {
+	secretBytes, err := os.ReadFile(s.secretFile)
+	if err != nil {
+		log.Printf("read controller secret for proxy request: %v", err)
+		return
+	}
+	secret := strings.TrimSpace(string(secretBytes))
+	if secret == "" {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+secret)
+	query := req.URL.Query()
+	if query.Has("token") {
+		query.Set("token", secret)
+		req.URL.RawQuery = query.Encode()
 	}
 }
 

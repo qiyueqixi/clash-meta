@@ -9,7 +9,7 @@
       "gatewayPrefix": "/app/clash-meta",
       "gatewaySocket": "clash-meta.sock",
       "url": "/app/clash-meta/ui/",
-      "allUsers": false,
+      "allUsers": true,
       "noDisplay": false
     }
   }

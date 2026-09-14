@@ -217,8 +217,8 @@ def validate_entry() -> None:
     entry = entries[launch_name]
     if entry.get("noDisplay") is not False:
         raise RuntimeError("desktop entry must set noDisplay=false so fnOS shows the Open button")
-    if entry.get("allUsers") is not False:
-        raise RuntimeError("desktop entry must set allUsers=false because the dashboard controls mihomo")
+    if entry.get("allUsers") is not True:
+        raise RuntimeError("desktop entry must set allUsers=true for the fnOS embedded dashboard")
     if entry.get("type") not in {"url", "iframe"}:
         raise RuntimeError("desktop entry type must be url or iframe")
     if entry.get("gatewayPrefix") != "/app/clash-meta":

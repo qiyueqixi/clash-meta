@@ -41,7 +41,7 @@ D:\clash-meta
 
 ```text
 appname=clash.meta
-version=1.19.27-31
+version=1.19.27-32
 platform=x86
 desktop_uidir=ui
 desktop_applaunchname=clash.meta.Application
@@ -54,7 +54,26 @@ disable_authorization_path=false
 
 当前包不设置 `install_type=root`。飞牛文档说明 root 权限模式仅适用于官方合作企业开发者，第三方普通 Native 应用不应依赖 root 安装或系统目录写入。本包不需要低端口、系统目录写入或硬件访问，因此保持普通安装方式。
 
-`maintainer` / `distributor` 填 fnOS 包的实际维护者 `qiyueqixi`，不要写成 mihomo 上游 `MetaCubeX`。上游作者和许可证在 `THIRD_PARTY_NOTICES.md` 中归属，包元数据不能让用户误以为这是 MetaCubeX 官方发布的 fnOS 包。
+`maintainer` 使用上游项目归属 `MetaCubeX`，`distributor` 使用 `Clash.Meta fnOS Community`。这表示核心项目来源和社区打包方，不能把用户个人账号显示为开发者，也不能让用户误以为这是 MetaCubeX 官方发布的 fnOS 包。
+
+### `app/ui/config` 与统一网关
+
+内嵌面板必须使用 fnOS 统一网关，不声明端口，并设置 `allUsers=true`：
+
+```json
+{
+  "type": "iframe",
+  "gatewayPrefix": "/app/clash-meta",
+  "gatewaySocket": "clash-meta.sock",
+  "url": "/app/clash-meta/ui/",
+  "allUsers": true,
+  "noDisplay": false
+}
+```
+
+`allUsers=false` 会使入口按受限入口处理，在部分 fnOS 版本中桌面 iframe 得不到正确的统一网关 token，页面只显示 `invalid token`。管理员权限仍由网关的 `X-Trim-Isadmin` 检查保护，仅配置写入接口需要管理员权限。
+
+网关反代每次从应用文件 `config/secret` 读取 mihomo controller secret，并覆盖 HTTP `Authorization` 和日志 WebSocket 的 `token` 查询参数。这样前端不需要用户手工填写 token，也避免旧 token、错误 token 或 secret 更新后导致面板空白。
 
 版本号建议用:
 
@@ -301,7 +320,7 @@ F1FF796F579A242461DB509679515ADE127231989624A68CC588B52AF1514493  geosite.dat
       "gatewayPrefix": "/app/clash-meta",
       "gatewaySocket": "clash-meta.sock",
       "url": "/app/clash-meta/ui/",
-      "allUsers": false,
+      "allUsers": true,
       "noDisplay": false
     }
   }
@@ -310,7 +329,7 @@ F1FF796F579A242461DB509679515ADE127231989624A68CC588B52AF1514493  geosite.dat
 
 `manifest` 的 `desktop_applaunchname` 必须和这里的 `clash.meta.Application` 一致。应用中心“打开”按钮和桌面图标都依赖这个入口 ID，并且桌面入口必须显式设置 `noDisplay=false`。
 
-`allUsers=false` 是有意设计。MetaCubeXD 是 mihomo 控制面板，不是普通展示页面；默认不应对所有飞牛用户开放。需要给非管理员使用时，由飞牛侧授权或后续做安装向导/权限说明。
+`allUsers=true` 是当前统一网关内嵌面板要求。它表示所有已登录 fnOS 用户都能打开入口；写配置仍由网关注入的 `X-Trim-Isadmin: true` 单独保护。
 
 统一网关会先校验 fnOS 登录态，再把请求转发到 `${TRIM_APPDEST}/clash-meta.sock`。入口中不要同时保留 `port`；官方文档明确说明统一网关模式会忽略 `protocol` 和 `port`。
 
@@ -477,7 +496,7 @@ app/dashboard/pwa-512x512.png -> ICON_256.PNG 和 app/ui/images/icon_256.png
 在 `D:\clash-meta` 执行。当前不要再直接用 Windows 版 `fnpack build` 产出最终包，因为它会丢 Unix 执行权限。正式构建使用:
 
 ```powershell
-python scripts\build-fpk.py --version 1.19.27-31
+python scripts\build-fpk.py --version 1.19.27-32
 ```
 
 网关 helper 需要 Go 1.22 或更新版本。打包器会优先寻找系统 `go`，也支持解压在 `.tmp/go-full/go/` 的便携工具链；找到 Go 时自动交叉编译 x86/ARM，最终 FPK 不包含 Go。没有 Go 时只有在 `.tmp/downloads/` 已存在两个缓存二进制才可继续。
@@ -486,7 +505,7 @@ python scripts\build-fpk.py --version 1.19.27-31
 
 - 校验 `desktop_applaunchname` 是否匹配源码 `app/ui/config`
 - 校验桌面入口 `noDisplay=false`
-- 校验桌面入口 `allUsers=false`
+- 校验桌面入口 `allUsers=true`
 - 校验 `config/privilege` 使用 `run-as=package`
 - 校验 `config/resource` 只声明实际使用的 `data-share`，不保留空 `systemd-unit`
 - 校验 `manifest` 没有 `install_type=root`
@@ -544,7 +563,7 @@ geodata/geosite.dat
 9. 重新生成 `dist/SHA256SUMS.txt`。
 10. `manifest` 中 `desktop_applaunchname` 等于 `app.tgz` 顶层 `ui/config` 中的入口 ID。
 11. `ui/config` 入口包含 `noDisplay=false`。
-12. `ui/config` 入口包含 `allUsers=false`。
+12. `ui/config` 入口包含 `allUsers=true`。
 13. `config/privilege` 使用 `run-as=package`。
 14. `manifest` 不包含 `install_type=root`。
 15. 外层 `.fpk` 包含 `LICENSE`。
@@ -1285,7 +1304,7 @@ geodata/geosite.dat
 局限:
 
 - fnOS 网关负责登录校验，mihomo secret 仍负责本地代理到控制器时的第二层鉴权。
-- 前端运行时仍能读取自身 endpoint secret，因此入口保持 `allUsers=false`，只向管理员展示。
+- 前端运行时仍能读取自身 endpoint secret；统一网关入口使用 `allUsers=true` 让已登录用户能打开面板，网关代理会在后端请求处统一注入正确 secret，配置写入接口仍只允许管理员。
 - 给用户示例完整配置时，不要让用户复制到可运行配置里的 `secret` 或订阅 token 留成自然语言占位符；要明确说“保留原文件这一行”，或用 `<REPLACE_WITH_EXISTING_SECRET>` 这类显眼占位并提醒必须替换。
 
 ### 2026-06-21: 首次打开面板，点“添加”没反应
