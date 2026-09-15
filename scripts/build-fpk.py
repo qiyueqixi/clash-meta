@@ -389,6 +389,9 @@ def validate_entry() -> None:
         "CONTROLLER_URL=\"http://127.0.0.1:19090\"",
         "wait_controller_ready()",
         "mihomo controller did not become ready",
+        "stop_orphan_runtime_processes()",
+        "${BIN}.new.$$",
+        "mv -f \"${mihomo_tmp}\" \"${BIN}\"",
     ):
         if required_text not in cmd_main_text:
             raise RuntimeError(f"{cmd_main} is missing {required_text!r}")

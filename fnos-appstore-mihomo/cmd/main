@@ -987,19 +987,27 @@ prepare_geodata() {
 }
 
 prepare_binary() {
+    local mihomo_tmp="${BIN}.new.$$"
+    local gateway_tmp="${GATEWAY_BIN}.new.$$"
+
     if [ ! -f "${SOURCE_BIN}" ]; then
         log_msg "source binary does not exist: ${SOURCE_BIN}"
         return 1
     fi
 
-    cp "${SOURCE_BIN}" "${BIN}" >> "${LOG_FILE}" 2>&1 || return 1
-    chmod 755 "${BIN}" >> "${LOG_FILE}" 2>&1 || return 1
     if [ ! -f "${SOURCE_GATEWAY_BIN}" ]; then
         log_msg "source gateway binary does not exist: ${SOURCE_GATEWAY_BIN}"
         return 1
     fi
-    cp "${SOURCE_GATEWAY_BIN}" "${GATEWAY_BIN}" >> "${LOG_FILE}" 2>&1 || return 1
-    chmod 755 "${GATEWAY_BIN}" >> "${LOG_FILE}" 2>&1 || return 1
+
+    rm -f "${mihomo_tmp}" "${gateway_tmp}" 2>/dev/null || true
+    cp "${SOURCE_BIN}" "${mihomo_tmp}" >> "${LOG_FILE}" 2>&1 || return 1
+    chmod 755 "${mihomo_tmp}" >> "${LOG_FILE}" 2>&1 || return 1
+    mv -f "${mihomo_tmp}" "${BIN}" >> "${LOG_FILE}" 2>&1 || return 1
+
+    cp "${SOURCE_GATEWAY_BIN}" "${gateway_tmp}" >> "${LOG_FILE}" 2>&1 || return 1
+    chmod 755 "${gateway_tmp}" >> "${LOG_FILE}" 2>&1 || return 1
+    mv -f "${gateway_tmp}" "${GATEWAY_BIN}" >> "${LOG_FILE}" 2>&1 || return 1
     return 0
 }
 
@@ -1155,10 +1163,54 @@ stop_pid_file() {
     return 0
 }
 
+stop_orphan_runtime_processes() {
+    local proc_dir
+    local pid
+    local executable
+    local orphan_pids=""
+    local count=0
+
+    for proc_dir in /proc/[0-9]*; do
+        [ -d "${proc_dir}" ] || continue
+        pid="${proc_dir#/proc/}"
+        executable="$(readlink "${proc_dir}/exe" 2>/dev/null || true)"
+        case "${executable}" in
+        */@appdata/clash.meta/bin/mihomo|*/@appdata/clash.meta/bin/mihomo\ \(deleted\)|\
+        */@appdata/clash.meta/bin/gateway-proxy|*/@appdata/clash.meta/bin/gateway-proxy\ \(deleted\)|\
+        /var/apps/clash.meta/var/bin/mihomo|/var/apps/clash.meta/var/bin/mihomo\ \(deleted\)|\
+        /var/apps/clash.meta/var/bin/gateway-proxy|/var/apps/clash.meta/var/bin/gateway-proxy\ \(deleted\))
+            log_msg "stopping orphan clash.meta runtime process pid=${pid} executable=${executable}"
+            kill -TERM "${pid}" >> "${LOG_FILE}" 2>&1 || true
+            orphan_pids="${orphan_pids} ${pid}"
+            ;;
+        esac
+    done
+
+    while [ "${count}" -lt 10 ]; do
+        local still_running="false"
+        for pid in ${orphan_pids}; do
+            if is_running_pid "${pid}"; then
+                still_running="true"
+                break
+            fi
+        done
+        [ "${still_running}" = "false" ] && return 0
+        sleep 1
+        count=$((count + 1))
+    done
+
+    for pid in ${orphan_pids}; do
+        if is_running_pid "${pid}"; then
+            kill -KILL "${pid}" >> "${LOG_FILE}" 2>&1 || true
+        fi
+    done
+}
+
 stop_process() {
     stop_pid_file "${GATEWAY_PID_FILE}" "clash.meta gateway"
     rm -f "${GATEWAY_SOCKET}" 2>/dev/null || true
     stop_pid_file "${PID_FILE}" "${APP_NAME}"
+    stop_orphan_runtime_processes
 }
 
 case "$1" in
