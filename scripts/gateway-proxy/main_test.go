@@ -100,6 +100,21 @@ func TestProxyStripsGatewayPrefix(t *testing.T) {
 	}
 }
 
+func TestGatewayRootMapsToControllerRoot(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.URL.Path)
+	}))
+	defer backend.Close()
+
+	s := newTestServer(t, backend, "unused", "unused")
+	request := httptest.NewRequest(http.MethodGet, "/app/clash-meta/", nil)
+	response := httptest.NewRecorder()
+	s.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != "/" {
+		t.Fatalf("gateway root must map to controller root: status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
 func TestConfigWriteRequiresAdminAndReloads(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "config.yaml")

@@ -1,5 +1,5 @@
 appname=clash.meta
-version=1.19.27-33
+version=1.19.27-34
 display_name=Clash.Meta
 desc=Clash.Meta mihomo core with built-in MetaCubeXD web dashboard.
 platform=x86
@@ -14,4 +14,4 @@ desktop_applaunchname=clash.meta.Application
 checkport=false
 ctl_stop=true
 disable_authorization_path=false
-changelog=Refresh the fnOS embedded dashboard package and preserve user configuration during upgrade.
+changelog=Fix the embedded dashboard root route and unified gateway socket permissions.

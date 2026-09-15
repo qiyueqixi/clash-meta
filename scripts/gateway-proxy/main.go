@@ -67,7 +67,7 @@ func main() {
 		log.Fatalf("listen on %s: %v", socketPath, err)
 	}
 	defer listener.Close()
-	if err := os.Chmod(socketPath, 0o660); err != nil {
+	if err := os.Chmod(socketPath, 0o666); err != nil {
 		log.Fatalf("chmod socket: %v", err)
 	}
 
@@ -134,10 +134,6 @@ func stripPrefix(path, prefix string) string {
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == s.prefix || r.URL.Path == s.prefix+"/" {
-		http.Redirect(w, r, s.prefix+"/ui/", http.StatusTemporaryRedirect)
-		return
-	}
 	if r.URL.Path == s.prefix+"/_fnos/config" {
 		s.handleConfig(w, r)
 		return

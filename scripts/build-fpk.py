@@ -225,8 +225,8 @@ def validate_entry() -> None:
         raise RuntimeError("desktop entry must use gatewayPrefix=/app/clash-meta")
     if entry.get("gatewaySocket") != "clash-meta.sock":
         raise RuntimeError("desktop entry must use gatewaySocket=clash-meta.sock")
-    if entry.get("url") != "/app/clash-meta/ui/":
-        raise RuntimeError("desktop entry must open /app/clash-meta/ui/")
+    if entry.get("url") != "/app/clash-meta/":
+        raise RuntimeError("desktop entry must open /app/clash-meta/")
     if "port" in entry:
         raise RuntimeError("unified gateway desktop entry must not declare a port")
 

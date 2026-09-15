@@ -8,7 +8,7 @@
       "protocol": "",
       "gatewayPrefix": "/app/clash-meta",
       "gatewaySocket": "clash-meta.sock",
-      "url": "/app/clash-meta/ui/",
+      "url": "/app/clash-meta/",
       "allUsers": true,
       "noDisplay": false
     }

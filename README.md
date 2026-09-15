@@ -4,11 +4,11 @@
 
 这是飞牛 fnOS 可直接安装的 Clash.Meta / mihomo 原生 Native 应用，不是 Docker 包。
 
-- 应用版本: `1.19.27-33`
+- 应用版本: `1.19.27-34`
 - mihomo: `v1.19.27`
 - Web 面板: `MetaCubeXD v1.258.3`
 - 架构: x86_64 compatible、ARM64
-- 入口: fnOS 统一网关 `/app/clash-meta/ui/`
+- 入口: fnOS 统一网关 `/app/clash-meta/`
 - 默认代理端口: `7899`
 - DNS 端口: `1053`
 
@@ -29,8 +29,8 @@
 
 产物位于 [dist](D:/clash-meta/dist)：
 
-- `clash.meta_1.19.27-33_x86.fpk`
-- `clash.meta_1.19.27-33_arm.fpk`
+- `clash.meta_1.19.27-34_x86.fpk`
+- `clash.meta_1.19.27-34_arm.fpk`
 - `SHA256SUMS.txt`
 
 构建：
