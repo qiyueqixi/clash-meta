@@ -41,7 +41,7 @@ D:\clash-meta
 
 ```text
 appname=clash.meta
-version=1.19.27-38
+version=1.19.27-39
 platform=x86
 desktop_uidir=ui
 desktop_applaunchname=clash.meta.Application
@@ -496,7 +496,7 @@ app/dashboard/pwa-512x512.png -> ICON_256.PNG 和 app/ui/images/icon_256.png
 在 `D:\clash-meta` 执行。当前不要再直接用 Windows 版 `fnpack build` 产出最终包，因为它会丢 Unix 执行权限。正式构建使用:
 
 ```powershell
-python scripts\build-fpk.py --version 1.19.27-38
+python scripts\build-fpk.py --version 1.19.27-39
 ```
 
 网关 helper 需要 Go 1.22 或更新版本。打包器会优先寻找系统 `go`，也支持解压在 `.tmp/go-full/go/` 的便携工具链；找到 Go 时自动交叉编译 x86/ARM，最终 FPK 不包含 Go。没有 Go 时只有在 `.tmp/downloads/` 已存在两个缓存二进制才可继续。
@@ -1360,9 +1360,9 @@ window.metacubexd.endpoint = {
 
 完整实机日志显示，选择保留配置卸载后可能仍有 mihomo 和 gateway-proxy 进程存活，但 `${TRIM_PKGVAR}/run/*.pid` 已被 fnOS 清理。重装启动时旧 `prepare_binary` 直接用 `cp` 覆盖正在执行的 `${TRIM_PKGVAR}/bin/mihomo`，Linux 返回 `Text file busy`。
 
-`1.19.27-38` 增加两层恢复：
+`1.19.27-39` 增加两层恢复：
 
-- `stop_process` 除 PID 文件外，还扫描 `/proc/*/exe`，只终止执行路径精确匹配 `@appdata/clash.meta/bin/mihomo` 或 `gateway-proxy` 的本应用孤儿进程，包括已删除 inode；不会按进程名误杀其他应用。
+- `stop_process` 除 PID 文件外，还扫描 `/proc/*/exe`，只终止执行路径位于 `@appdata/clash.meta/bin/` 下的 mihomo 或 gateway-proxy 本应用进程，包括带 ` (deleted)` 后缀的 inode；不会按进程名误杀其他应用。
 - `prepare_binary` 先复制到同目录的 `.new.<pid>` 临时文件，设置 `0755` 后用 `mv` 原子替换目标文件，避免覆盖正在执行的 inode。
 
 实机在“两个进程存活但 PID 文件均不存在”的状态下验证：脚本记录两条 `stopping orphan clash.meta runtime process`，随后启动成功，PID 文件恢复，controller、统一网关、订阅与内嵌 UI 均正常。

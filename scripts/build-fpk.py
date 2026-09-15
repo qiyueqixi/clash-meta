@@ -392,6 +392,7 @@ def validate_entry() -> None:
         "stop_orphan_runtime_processes()",
         "${BIN}.new.$$",
         "mv -f \"${mihomo_tmp}\" \"${BIN}\"",
+        "*/@appdata/clash.meta/bin/mihomo*",
     ):
         if required_text not in cmd_main_text:
             raise RuntimeError(f"{cmd_main} is missing {required_text!r}")

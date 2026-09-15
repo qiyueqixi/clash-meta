@@ -1175,10 +1175,8 @@ stop_orphan_runtime_processes() {
         pid="${proc_dir#/proc/}"
         executable="$(readlink "${proc_dir}/exe" 2>/dev/null || true)"
         case "${executable}" in
-        */@appdata/clash.meta/bin/mihomo|*/@appdata/clash.meta/bin/mihomo\ \(deleted\)|\
-        */@appdata/clash.meta/bin/gateway-proxy|*/@appdata/clash.meta/bin/gateway-proxy\ \(deleted\)|\
-        /var/apps/clash.meta/var/bin/mihomo|/var/apps/clash.meta/var/bin/mihomo\ \(deleted\)|\
-        /var/apps/clash.meta/var/bin/gateway-proxy|/var/apps/clash.meta/var/bin/gateway-proxy\ \(deleted\))
+        */@appdata/clash.meta/bin/mihomo*|*/@appdata/clash.meta/bin/gateway-proxy*|\
+        /var/apps/clash.meta/var/bin/mihomo*|/var/apps/clash.meta/var/bin/gateway-proxy*)
             log_msg "stopping orphan clash.meta runtime process pid=${pid} executable=${executable}"
             kill -TERM "${pid}" >> "${LOG_FILE}" 2>&1 || true
             orphan_pids="${orphan_pids} ${pid}"

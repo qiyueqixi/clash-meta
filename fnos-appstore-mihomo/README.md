@@ -4,7 +4,7 @@
 
 - Core: mihomo v1.19.27
 - Dashboard: MetaCubeXD v1.258.3
-- Package: 1.19.27-38
+- Package: 1.19.27-39
 - fnOS gateway: `/app/clash-meta/ui/`
 - Proxy port: `7899`
 - Local-only controller: `127.0.0.1:19090`
