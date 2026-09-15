@@ -4,10 +4,10 @@
 
 - Core: mihomo v1.19.27
 - Dashboard: MetaCubeXD v1.258.3
-- Package: 1.19.27-35
+- Package: 1.19.27-37
 - fnOS gateway: `/app/clash-meta/ui/`
 - Proxy port: `7899`
-- Local-only controller: `127.0.0.1:9090`
+- Local-only controller: `127.0.0.1:19090`
 
 安装向导和应用设置页均提供“订阅 / 导入链接”和“完整 YAML 配置 URL”两个输入框，二选一填写；`clash://install-config?url=...` 填订阅框。新生成的订阅配置每天自动更新 provider，并默认通过“自动选择”延迟测试组选择节点。
 

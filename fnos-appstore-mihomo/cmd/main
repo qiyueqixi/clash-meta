@@ -35,7 +35,8 @@ CONFIG_DIR="${APP_SHARE}/config"
 LOG_DIR="${APP_SHARE}/logs"
 RUN_DIR="${APP_VAR}/run"
 BIN_DIR="${APP_VAR}/bin"
-RUNTIME_DASHBOARD_DIR="${CONFIG_DIR}/dashboard"
+RUNTIME_DASHBOARD_ROOT="${CONFIG_DIR}/dashboard"
+RUNTIME_DASHBOARD_DIR="${RUNTIME_DASHBOARD_ROOT}/MetaCubeXD"
 PID_FILE="${RUN_DIR}/mihomo.pid"
 GATEWAY_PID_FILE="${RUN_DIR}/gateway.pid"
 GATEWAY_SOCKET="${APP_HOME}/clash-meta.sock"
@@ -46,9 +47,10 @@ SOURCE_GATEWAY_BIN="${APP_HOME}/gateway-proxy"
 GATEWAY_BIN="${BIN_DIR}/gateway-proxy"
 CONFIG_FILE="${CONFIG_DIR}/config.yaml"
 SECRET_FILE="${CONFIG_DIR}/secret"
+CONTROLLER_URL="http://127.0.0.1:19090"
 TEMPLATE_FILE="${APP_HOME}/config.default.yaml"
 DASHBOARD_SOURCE_DIR="${APP_HOME}/dashboard"
-DASHBOARD_DIR="${RUNTIME_DASHBOARD_DIR}"
+DASHBOARD_DIR="${RUNTIME_DASHBOARD_ROOT}"
 GEODATA_DIR="${APP_HOME}/geodata"
 WIZARD_DIR="${CONFIG_DIR}/wizard"
 WIZARD_MODE_FILE="${WIZARD_DIR}/mode"
@@ -251,7 +253,7 @@ bind-address: "*"
 mode: rule
 log-level: info
 ipv6: false
-external-controller: 127.0.0.1:9090
+external-controller: 127.0.0.1:19090
 external-ui: dashboard
 secret: ""
 geo-auto-update: false
@@ -653,10 +655,11 @@ ensure_config_runtime_settings() {
         BEGIN {
             external_controller = 0
             external_ui = 0
+            external_ui_name = 0
             geo_auto_update = 0
         }
         /^[[:space:]]*external-controller[[:space:]]*:/ {
-            print "external-controller: 127.0.0.1:9090"
+            print "external-controller: 127.0.0.1:19090"
             external_controller = 1
             next
         }
@@ -666,7 +669,11 @@ ensure_config_runtime_settings() {
             next
         }
         /^[[:space:]]*external-ui-name[[:space:]]*:/ {
+            if (external_ui_name == 1) {
+                next
+            }
             print "external-ui-name: MetaCubeXD"
+            external_ui_name = 1
             next
         }
         /^[[:space:]]*external-ui-url[[:space:]]*:/ {
@@ -680,12 +687,14 @@ ensure_config_runtime_settings() {
         { print }
         END {
             if (external_controller == 0) {
-                print "external-controller: 127.0.0.1:9090"
+                print "external-controller: 127.0.0.1:19090"
             }
             if (external_ui == 0) {
                 print "external-ui: dashboard"
             }
-            print "external-ui-name: MetaCubeXD"
+            if (external_ui_name == 0) {
+                print "external-ui-name: MetaCubeXD"
+            }
             if (geo_auto_update == 0) {
                 print "geo-auto-update: false"
             }
@@ -922,7 +931,7 @@ prepare_dashboard() {
     fi
 
     case "${RUNTIME_DASHBOARD_DIR}" in
-    "${CONFIG_DIR}/dashboard")
+    "${CONFIG_DIR}/dashboard/MetaCubeXD")
         rm -rf "${RUNTIME_DASHBOARD_DIR}"
         ;;
     *)
@@ -1018,6 +1027,40 @@ status_process() {
     [ -S "${GATEWAY_SOCKET}" ] || return 3
 }
 
+controller_is_ready() {
+    local secret
+    local response
+
+    secret="$(head -n 1 "${SECRET_FILE}" | tr -d '\r\n')"
+    if command -v curl >/dev/null 2>&1; then
+        response="$(curl --fail --silent --max-time 2 \
+            -H "Authorization: Bearer ${secret}" \
+            "${CONTROLLER_URL}/version" 2>/dev/null)" || return 1
+    elif command -v wget >/dev/null 2>&1; then
+        response="$(wget -q -T 2 -O - \
+            --header="Authorization: Bearer ${secret}" \
+            "${CONTROLLER_URL}/version" 2>/dev/null)" || return 1
+    else
+        log_msg "curl or wget is required to verify the mihomo controller"
+        return 1
+    fi
+
+    printf '%s' "${response}" | LC_ALL=C grep -q '"version"'
+}
+
+wait_controller_ready() {
+    local count=0
+
+    while [ "${count}" -lt 10 ]; do
+        if controller_is_ready; then
+            return 0
+        fi
+        sleep 1
+        count=$((count + 1))
+    done
+    return 1
+}
+
 start_process() {
     if status_process; then
         log_msg "${APP_NAME} is already running"
@@ -1055,11 +1098,18 @@ start_process() {
         return 1
     fi
 
+    if ! wait_controller_ready; then
+        log_msg "mihomo controller did not become ready at ${CONTROLLER_URL}"
+        write_temp_log
+        stop_pid_file "${PID_FILE}" "${APP_NAME}"
+        return 1
+    fi
+
     rm -f "${GATEWAY_SOCKET}" 2>/dev/null || true
     "${GATEWAY_BIN}" \
         -socket "${GATEWAY_SOCKET}" \
         -prefix "/app/clash-meta" \
-        -target "http://127.0.0.1:9090" \
+        -target "${CONTROLLER_URL}" \
         -config "${CONFIG_FILE}" \
         -secret-file "${SECRET_FILE}" >> "${LOG_FILE}" 2>&1 &
     echo "$!" > "${GATEWAY_PID_FILE}"

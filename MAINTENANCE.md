@@ -41,7 +41,7 @@ D:\clash-meta
 
 ```text
 appname=clash.meta
-version=1.19.27-35
+version=1.19.27-37
 platform=x86
 desktop_uidir=ui
 desktop_applaunchname=clash.meta.Application
@@ -255,11 +255,11 @@ cmd/main status
 - 如果两者都为空，首次启动生成随机 64 位十六进制 secret。
 - 从 `1.19.27-29` 开始，如果 `config.yaml` 或 `secret` 文件里是 `保留你原来的 secret`、`change-me`、`REPLACE_ME` 这类明显占位符，会忽略该值并重新生成真实 secret。
 - secret 文件权限尽量设置为 `0600`。
-- 每次启动都会把安装目录的 `dashboard/` 复制到 `${TRIM_PKGVAR}/dashboard`，再把 secret 注入运行时 `config.js`。
+- 每次启动都会把安装目录的 `dashboard/` 复制到 `${TRIM_DATA_SHARE_PATHS}/config/dashboard/MetaCubeXD`，再把 secret 注入运行时 `config.js`。
 
 安全边界:
 
-- `external-controller` 从 `1.19.27-30` 起强制迁移为 `127.0.0.1:9090`，局域网和公网都不能直接访问控制器。
+- `external-controller` 从 `1.19.27-36` 起强制迁移为 `127.0.0.1:19090`，局域网和公网都不能直接访问控制器。
 - 内嵌 Web 面板仍需要 secret，因此运行时 `config.js` 会包含它；但该文件只能经 fnOS 统一网关和登录校验访问。
 - 不要把控制器重新改成 `0.0.0.0:9090`，也不要为了网关入口改成 root 包。
 
@@ -496,7 +496,7 @@ app/dashboard/pwa-512x512.png -> ICON_256.PNG 和 app/ui/images/icon_256.png
 在 `D:\clash-meta` 执行。当前不要再直接用 Windows 版 `fnpack build` 产出最终包，因为它会丢 Unix 执行权限。正式构建使用:
 
 ```powershell
-python scripts\build-fpk.py --version 1.19.27-35
+python scripts\build-fpk.py --version 1.19.27-37
 ```
 
 网关 helper 需要 Go 1.22 或更新版本。打包器会优先寻找系统 `go`，也支持解压在 `.tmp/go-full/go/` 的便携工具链；找到 Go 时自动交叉编译 x86/ARM，最终 FPK 不包含 Go。没有 Go 时只有在 `.tmp/downloads/` 已存在两个缓存二进制才可继续。
@@ -631,7 +631,7 @@ MoviePilot 项目验证了新版 `gatewayPrefix` / `gatewaySocket` 可以稳定�
 
 `1.19.27-33` 的实机测试发现两个额外问题：mihomo 的外部 UI 实际通过 `/ui/` 提供，入口必须打开 `/app/clash-meta/ui/`，不能把 controller 根路径误当成外部 UI。此外 fnOS nginx worker 以 `www-data` 运行，应用进程创建的 Unix Socket 若为 `0660 clash.meta:clash.meta`，统一网关无法连接；网关 Socket 必须设置为 `0666`。不要把这两个值收回旧配置，否则分别表现为 Yuehub/错误页面和网关连接失败。
 
-`1.19.27-34` 的实机截图又暴露出 mihomo 内置 Yuehub 管理页覆盖了外部面板：仅设置 `external-ui: dashboard` 不足以选择内置 MetaCubeXD。`1.19.27-35` 在默认配置及每次运行时配置迁移中固定写入 `external-ui-name: MetaCubeXD`，并把运行时 dashboard 放到应用文件 `config/dashboard` 安全路径，确保 `/ui/` 返回包内 MetaCubeXD，而不是 Yuehub。已有用户配置升级时会自动补这一行，不删除订阅或其他配置。
+`1.19.27-34` 的实机截图又暴露出 mihomo 内置 Yuehub 管理页覆盖了外部面板：仅设置 `external-ui: dashboard` 不足以选择内置 MetaCubeXD。`1.19.27-35` 在默认配置及每次运行时配置迁移中固定写入 `external-ui-name: MetaCubeXD`。`1.19.27-37` 进一步确认具名 UI 必须位于 `config/dashboard/MetaCubeXD`，而 `-ext-ui` 指向父目录 `config/dashboard`；否则 mihomo 会尝试从 GitHub 补下载。已有用户配置升级时会自动迁移，不删除订阅或其他配置。
 
 新版文档同时增加了应用 loading 能力，但 mihomo 通常两三秒即可启动，现有 fnOS 启用状态和 `${TRIM_TEMP_LOGFILE}` 错误提示已足够。本项目明确不增加 loading 页面、背景图或轮询逻辑，避免为短启动流程引入额外状态和维护成本。
 
@@ -670,16 +670,17 @@ Start Mixed(http+socks) server error: listen tcp :7890: bind: address already in
 
 修复:
 
-- 从 `1.19.27-35` 开始，新生成配置和默认模板固定写入 `external-ui-name: MetaCubeXD`，并继续删除 `external-ui-url`，确保运行时只使用包内 `${TRIM_PKGVAR}/dashboard`。
+- 从 `1.19.27-35` 开始，新生成配置和默认模板固定写入 `external-ui-name: MetaCubeXD`，并继续删除 `external-ui-url`，确保运行时只使用包内 `${TRIM_DATA_SHARE_PATHS}/config/dashboard/MetaCubeXD`。
 - `ensure_config_runtime_settings` 会把用户配置里的 `external-ui-name` 规范化为 `MetaCubeXD`，并删除 `external-ui-url`。
+- 该迁移必须幂等：已有配置只保留一行，缺失时才追加。无条件追加会在卸载重装或重复启动后生成重复 YAML 键，mihomo 会报 `mapping key "external-ui-name" already defined`。
 - 新生成配置和默认模板把 `mixed-port` 改为 `7899`，降低和已有 `7890` 服务冲突的概率。
 - `migrate_subscription_config` 只会把安装向导生成的旧订阅配置从 `mixed-port: 7890` 迁移到 `7899`，不强行改用户手写完整 YAML。
 - 新生成配置的 DNS bootstrap 改为 IP nameserver；`migrate_bootstrap_dns` 会迁移旧安装向导订阅配置里的 `default-nameserver`、`nameserver` 和 `fallback`，避免拉订阅前解析 DoH 域名又依赖代理或 DNS 自举。
 
 踩坑:
 
-- 内嵌包必须同时设置 `external-ui: dashboard`、`external-ui-name: MetaCubeXD` 和启动参数 `-ext-ui "${DASHBOARD_DIR}"`。
-- `9090` 是应用中心入口和控制 API 端口，不能随意变；代理端口冲突优先改 `mixed-port`。
+- 内嵌包必须同时设置 `external-ui: dashboard`、`external-ui-name: MetaCubeXD` 和启动参数 `-ext-ui "${DASHBOARD_DIR}"`；包内文件复制到 `${DASHBOARD_DIR}/MetaCubeXD`，不能直接散放在 `${DASHBOARD_DIR}` 根目录。
+- `19090` 是仅本机控制 API 端口；代理端口冲突优先改 `mixed-port`。启动脚本必须在拉起网关前验证带密钥的 `/version` 响应，不能只以 mihomo 进程存活判定启动成功。
 - 如果用户已有 `config.yaml` 是完整自定义配置，维护脚本不能擅自改端口。需要用户手动编辑 `<应用文件>/clash.meta/config/config.yaml` 后重启应用。
 - 如果继续看到 GitHub UI 下载日志，先检查运行时 `config.yaml` 是否缺少 `external-ui-name: MetaCubeXD` 或仍残留 `external-ui-url`。
 
@@ -867,7 +868,7 @@ Start Mixed(http+socks) server error: listen tcp :7890: bind: address already in
 问题:
 
 - 飞牛官方文档里 root 权限模式只适合官方合作或确实需要系统级能力的应用。
-- 本包只需要监听 `7899/9090/1053`、读取安装目录、写应用文件目录和运行态目录，不需要 root。
+- 本包只需要监听 `7899/19090/1053`、读取安装目录、写应用文件目录和运行态目录，不需要 root。
 - 包内捆绑 mihomo、MetaCubeXD 和 geodata，缺少第三方许可说明不符合长期维护和再分发要求。
 
 修复:
@@ -1252,7 +1253,7 @@ geodata/geosite.dat
 常见原因:
 
 - `config.yaml` 格式错误
-- `7899`、`9090` 或 `1053` 端口被占用
+- `7899`、`19090` 或 `1053` 端口被占用
 - 二进制没有执行权限
 - 包架构装错，例如 ARM 机器安装了 x86 包
 - 内置 geodata 缺失或损坏
@@ -1266,7 +1267,7 @@ geodata/geosite.dat
 - 入口是否设置了 `noDisplay=false`
 - `ui/config` 是否声明 `gatewayPrefix=/app/clash-meta` 和 `gatewaySocket=clash-meta.sock`
 - 日志是否出现 `fnOS gateway listening on .../clash-meta.sock`
-- `config.yaml` 是否有 `external-controller: 127.0.0.1:9090`
+- `config.yaml` 是否有 `external-controller: 127.0.0.1:19090`
 - `app/dashboard/config.js` 是否仍使用 `/app/clash-meta` 后端前缀
 
 ### 面板打开但连接不上后端
@@ -1279,7 +1280,7 @@ geodata/geosite.dat
 - 如果用户手动设置了 `config.yaml` 的 `secret`，运行时 dashboard 会沿用它；外部 MetaCubeXD 也需要同步填写同一个值。
 - 如果用户把文档里的 `保留你原来的 secret` 这类占位符原样写进 `config.yaml`，`1.19.27-28` 及更早版本会把它当成真实密钥。`1.19.27-29` 起会识别这类占位符并重新生成真实 secret。
 - 浏览器路径是否位于 `/app/clash-meta/ui/`
-- `external-controller` 是否只监听 `127.0.0.1:9090`
+- `external-controller` 是否只监听 `127.0.0.1:19090`
 
 ### 2026-06-21: 空密钥存在安全风险
 
@@ -1301,9 +1302,9 @@ geodata/geosite.dat
 - 如果用户已有非空 `config.yaml secret`，不覆盖用户配置，只同步给运行时 dashboard。
 - 如果旧配置是空密钥，则自动写入随机 secret。
 - 从 `1.19.27-29` 开始，`prepare_secret` 会调用 `is_placeholder_secret()`，识别并忽略 `保留你原来的 secret`、`change-me`、`REPLACE_ME` 等明显占位符，然后重新生成真实 secret 并写回 `config.yaml`。
-- 启动时复制 dashboard 到 `${TRIM_PKGVAR}/dashboard`，再把 secret 注入运行时 `config.js`。
-- mihomo 启动参数改为 `-ext-ui "${TRIM_PKGVAR}/dashboard"`。
-- 从 `1.19.27-30` 开始，控制器收口到 `127.0.0.1:9090`，面板只经 fnOS 统一网关访问；这才是当前网络边界。
+- 启动时复制 dashboard 到 `${TRIM_DATA_SHARE_PATHS}/config/dashboard/MetaCubeXD`，再把 secret 注入运行时 `config.js`。
+- mihomo 启动参数改为 `-ext-ui "${TRIM_DATA_SHARE_PATHS}/config/dashboard"`。
+- 从 `1.19.27-30` 开始控制器收口到回环地址；`1.19.27-36` 起改用 `127.0.0.1:19090` 避免与 NAS 上常见的 `9090` 服务冲突，面板只经 fnOS 统一网关访问。
 
 局限:
 
@@ -1342,6 +1343,18 @@ window.metacubexd.endpoint = {
 - 只在当前选中端点为空、失效、就是 `local-mihomo`，或旧端点 host 等于当前访问 host 时自动切换，避免覆盖用户手动添加的远程后端。
 
 当前实机排障应从 fnOS 桌面入口打开 `/app/clash-meta/ui/`，并在日志中确认本机 controller、`config/dashboard` 和 Unix Socket 都已启动。不要把 9090 改回 LAN 监听来绕过网关。
+
+### 2026-09-16: 卸载重装后的重复字段与端口冲突
+
+实机卸载重装 `1.19.27-35` 后发现三个连续问题：
+
+- 运行时迁移每执行一次就追加一次 `external-ui-name: MetaCubeXD`，重复启动后 YAML 出现同名键，mihomo 报 `mapping key "external-ui-name" already defined`。
+- NAS 上已有 Node 服务监听 `0.0.0.0:9090`。mihomo 进程虽然存活，但 controller 绑定失败；旧状态检查只看 PID，会错误地继续启动网关并报告成功。
+- `external-ui-name: MetaCubeXD` 会让 mihomo 在 `-ext-ui` 目录下查找 `MetaCubeXD` 子目录。静态文件直接放在父目录时仍会触发 GitHub 下载。
+
+`1.19.27-37` 将配置迁移改为幂等，重复字段自动压缩为一行；内部 controller 改为 `127.0.0.1:19090`，启动网关前使用 controller secret 请求 `/version`；内嵌 UI 放到 `config/dashboard/MetaCubeXD`。实机日志应显示 `UI already exists, skip downloading`，而不是 `External UI downloading ...`。`mixed-port: 7899` 和 DNS `1053` 不变。
+
+官方框架文档强调生命周期脚本可能被重复执行，因此所有配置迁移都必须满足幂等性，不能依赖安装、启动、升级或恢复流程只调用一次。
 
 ## 后续可改进项
 

@@ -1,5 +1,5 @@
 appname=clash.meta
-version=1.19.27-35
+version=1.19.27-37
 display_name=Clash.Meta
 desc=Clash.Meta mihomo core with built-in MetaCubeXD web dashboard.
 platform=x86
@@ -14,4 +14,4 @@ desktop_applaunchname=clash.meta.Application
 checkport=false
 ctl_stop=true
 disable_authorization_path=false
-changelog=Select the bundled MetaCubeXD dashboard instead of the mihomo built-in manager.
+changelog=Repair repeated UI settings and avoid controller port conflicts after reinstall.

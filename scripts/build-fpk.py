@@ -256,7 +256,7 @@ def validate_entry() -> None:
     default_config_text = default_config_path.read_text(encoding="utf-8")
     for required_text in (
         "mixed-port: 7899",
-        "external-controller: 127.0.0.1:9090",
+        "external-controller: 127.0.0.1:19090",
         "external-ui: dashboard",
         "external-ui-name: MetaCubeXD",
         "geo-auto-update: false",
@@ -265,6 +265,9 @@ def validate_entry() -> None:
     ):
         if required_text not in default_config_text:
             raise RuntimeError(f"{default_config_path} is missing {required_text!r}")
+    main_text = (SOURCE_DIR / "cmd" / "main").read_text(encoding="utf-8")
+    if "external_ui_name = 0" not in main_text or "if (external_ui_name == 0)" not in main_text:
+        raise RuntimeError("cmd/main must add external-ui-name only when it is absent")
     for forbidden_text in (
         "mixed-port: 7890",
         "external-ui-url:",
@@ -377,11 +380,15 @@ def validate_entry() -> None:
         "mixed-port: 7899",
         "geo-auto-update: false",
         "RUNTIME_DASHBOARD_DIR=",
+        "RUNTIME_DASHBOARD_ROOT=",
         "configured_by_install_wizard",
         "-ext-ui \"${DASHBOARD_DIR}\"",
         "GATEWAY_SOCKET=",
         "SOURCE_GATEWAY_BIN=",
         "-prefix \"/app/clash-meta\"",
+        "CONTROLLER_URL=\"http://127.0.0.1:19090\"",
+        "wait_controller_ready()",
+        "mihomo controller did not become ready",
     ):
         if required_text not in cmd_main_text:
             raise RuntimeError(f"{cmd_main} is missing {required_text!r}")

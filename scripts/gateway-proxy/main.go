@@ -42,7 +42,7 @@ func main() {
 
 	flag.StringVar(&socketPath, "socket", "clash-meta.sock", "Unix socket path")
 	flag.StringVar(&prefix, "prefix", "/app/clash-meta", "fnOS gateway prefix")
-	flag.StringVar(&targetURL, "target", "http://127.0.0.1:9090", "mihomo controller URL")
+	flag.StringVar(&targetURL, "target", "http://127.0.0.1:19090", "mihomo controller URL")
 	flag.StringVar(&configPath, "config", "", "persistent mihomo config path")
 	flag.StringVar(&secretFile, "secret-file", "", "controller secret file")
 	flag.Parse()

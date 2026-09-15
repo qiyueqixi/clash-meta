@@ -147,7 +147,7 @@ func TestConfigWriteRequiresAdminAndReloads(t *testing.T) {
 	defer backend.Close()
 
 	s := newTestServer(t, backend, configPath, secretFile)
-	payload := "mixed-port: 7899\nexternal-controller: 127.0.0.1:9090\nproxy-groups: []\nrules: []\n"
+	payload := "mixed-port: 7899\nexternal-controller: 127.0.0.1:19090\nproxy-groups: []\nrules: []\n"
 	body, _ := json.Marshal(configRequest{Payload: payload})
 
 	denied := httptest.NewRecorder()

@@ -169,7 +169,7 @@ bind-address: "*"
 mode: rule
 log-level: info
 ipv6: false
-external-controller: 127.0.0.1:9090
+external-controller: 127.0.0.1:19090
 external-ui: dashboard
 secret: ${yamlQuote(localEndpoint.secret)}
 geo-auto-update: false
