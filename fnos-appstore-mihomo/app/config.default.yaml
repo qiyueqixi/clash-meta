@@ -6,6 +6,7 @@ log-level: info
 ipv6: false
 external-controller: 127.0.0.1:9090
 external-ui: dashboard
+external-ui-name: MetaCubeXD
 secret: ""
 geo-auto-update: false
 

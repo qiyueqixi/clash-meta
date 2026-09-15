@@ -41,7 +41,7 @@ D:\clash-meta
 
 ```text
 appname=clash.meta
-version=1.19.27-34
+version=1.19.27-35
 platform=x86
 desktop_uidir=ui
 desktop_applaunchname=clash.meta.Application
@@ -65,7 +65,7 @@ disable_authorization_path=false
   "type": "iframe",
   "gatewayPrefix": "/app/clash-meta",
   "gatewaySocket": "clash-meta.sock",
-  "url": "/app/clash-meta/",
+  "url": "/app/clash-meta/ui/",
   "allUsers": true,
   "noDisplay": false
 }
@@ -319,7 +319,7 @@ F1FF796F579A242461DB509679515ADE127231989624A68CC588B52AF1514493  geosite.dat
       "protocol": "",
       "gatewayPrefix": "/app/clash-meta",
       "gatewaySocket": "clash-meta.sock",
-      "url": "/app/clash-meta/",
+      "url": "/app/clash-meta/ui/",
       "allUsers": true,
       "noDisplay": false
     }
@@ -496,7 +496,7 @@ app/dashboard/pwa-512x512.png -> ICON_256.PNG 和 app/ui/images/icon_256.png
 在 `D:\clash-meta` 执行。当前不要再直接用 Windows 版 `fnpack build` 产出最终包，因为它会丢 Unix 执行权限。正式构建使用:
 
 ```powershell
-python scripts\build-fpk.py --version 1.19.27-34
+python scripts\build-fpk.py --version 1.19.27-35
 ```
 
 网关 helper 需要 Go 1.22 或更新版本。打包器会优先寻找系统 `go`，也支持解压在 `.tmp/go-full/go/` 的便携工具链；找到 Go 时自动交叉编译 x86/ARM，最终 FPK 不包含 Go。没有 Go 时只有在 `.tmp/downloads/` 已存在两个缓存二进制才可继续。
@@ -512,7 +512,7 @@ python scripts\build-fpk.py --version 1.19.27-34
 - 校验外层 `LICENSE` 和内层 `THIRD_PARTY_NOTICES.md`
 - 校验入口图标 `app/ui/images/64.png` 和 `app/ui/images/256.png` 存在
 - 校验内置 `country.mmdb`、`geoip.metadb`、完整版 `geoip.dat` 和完整版 `geosite.dat` 存在且大小合理
-- 校验默认配置使用 `mixed-port: 7899` 和 `geo-auto-update: false`，不包含 `external-ui-name` / `external-ui-url`，DNS bootstrap 不依赖 DoH 域名
+- 校验默认配置使用 `mixed-port: 7899`、`external-ui-name: MetaCubeXD` 和 `geo-auto-update: false`，不包含 `external-ui-url`，DNS bootstrap 不依赖 DoH 域名
 - 校验 `dashboard/config.js` 包含统一网关 endpoint 自举和持久化配置按钮
 - 校验 `cmd/main` 包含双进程状态、Unix Socket、`${TRIM_TEMP_LOGFILE}`、随机 secret、内置 geodata 和运行时 dashboard
 - 校验 `wizard/install` 包含中文原生安装向导、订阅/导入链接、完整 YAML 配置 URL 字段和 `clash://install-config` 提示
@@ -629,7 +629,9 @@ MoviePilot 项目验证了新版 `gatewayPrefix` / `gatewaySocket` 可以稳定�
 
 落地时不能只改 `app/ui/config`：mihomo 不认识 `/app/clash-meta` 前缀，所以必须由本地 helper 剥离前缀；MetaCubeXD 的 endpoint 也必须包含这个前缀。只改入口会出现 HTML 能打开、API 和 WebSocket 全部 404 的假成功。
 
-`1.19.27-33` 的实机测试发现两个额外问题：mihomo 使用 `-ext-ui <dashboard目录>` 后把静态页面挂在 controller 根路径 `/`，不是 `/ui/`，所以桌面入口必须打开 `/app/clash-meta/`，网关剥离前缀后转发到 `/`。此外 fnOS nginx worker 以 `www-data` 运行，应用进程创建的 Unix Socket 若为 `0660 clash.meta:clash.meta`，统一网关无法连接；网关 Socket 必须设置为 `0666`。不要把这两个值收回旧配置，否则分别表现为后端 JSON 404 和网关连接失败。
+`1.19.27-33` 的实机测试发现两个额外问题：mihomo 的外部 UI 实际通过 `/ui/` 提供，入口必须打开 `/app/clash-meta/ui/`，不能把 controller 根路径误当成外部 UI。此外 fnOS nginx worker 以 `www-data` 运行，应用进程创建的 Unix Socket 若为 `0660 clash.meta:clash.meta`，统一网关无法连接；网关 Socket 必须设置为 `0666`。不要把这两个值收回旧配置，否则分别表现为 Yuehub/错误页面和网关连接失败。
+
+`1.19.27-34` 的实机截图又暴露出 mihomo 内置 Yuehub 管理页覆盖了外部面板：仅设置 `external-ui: dashboard` 不足以选择内置 MetaCubeXD。`1.19.27-35` 在默认配置及每次运行时配置迁移中固定写入 `external-ui-name: MetaCubeXD`，并把运行时 dashboard 放到应用文件 `config/dashboard` 安全路径，确保 `/ui/` 返回包内 MetaCubeXD，而不是 Yuehub。已有用户配置升级时会自动补这一行，不删除订阅或其他配置。
 
 新版文档同时增加了应用 loading 能力，但 mihomo 通常两三秒即可启动，现有 fnOS 启用状态和 `${TRIM_TEMP_LOGFILE}` 错误提示已足够。本项目明确不增加 loading 页面、背景图或轮询逻辑，避免为短启动流程引入额外状态和维护成本。
 
@@ -663,27 +665,27 @@ Start Mixed(http+socks) server error: listen tcp :7890: bind: address already in
 ```
 
 - 本包已经内置 MetaCubeXD 静态文件，mihomo 不应该再下载 GitHub 上的 external-ui。
-- `external-ui-name: MetaCubeXD` 会触发 mihomo 的 UI 下载逻辑。即使启动参数传了 `-ext-ui`，配置里保留这个字段仍可能让核心尝试联网下载。
+- `external-ui-name: MetaCubeXD` 是 mihomo 选择 MetaCubeXD 外部 UI 的必要字段；启动参数 `-ext-ui` 提供本地目录，二者配合时不会依赖远程下载。
 - 默认 `mixed-port: 7890` 容易和用户已有代理服务冲突；截图中的 `bind: address already in use` 表示端口已经被其他进程占用。
 
 修复:
 
-- 从 `1.19.27-24` 开始，新生成配置和默认模板只保留 `external-ui: dashboard`，不再写 `external-ui-name` 或 `external-ui-url`。
-- `ensure_config_runtime_settings` 会删除用户配置里的 `external-ui-name` / `external-ui-url`，确保运行时只使用包内 `${TRIM_PKGVAR}/dashboard`。
+- 从 `1.19.27-35` 开始，新生成配置和默认模板固定写入 `external-ui-name: MetaCubeXD`，并继续删除 `external-ui-url`，确保运行时只使用包内 `${TRIM_PKGVAR}/dashboard`。
+- `ensure_config_runtime_settings` 会把用户配置里的 `external-ui-name` 规范化为 `MetaCubeXD`，并删除 `external-ui-url`。
 - 新生成配置和默认模板把 `mixed-port` 改为 `7899`，降低和已有 `7890` 服务冲突的概率。
 - `migrate_subscription_config` 只会把安装向导生成的旧订阅配置从 `mixed-port: 7890` 迁移到 `7899`，不强行改用户手写完整 YAML。
 - 新生成配置的 DNS bootstrap 改为 IP nameserver；`migrate_bootstrap_dns` 会迁移旧安装向导订阅配置里的 `default-nameserver`、`nameserver` 和 `fallback`，避免拉订阅前解析 DoH 域名又依赖代理或 DNS 自举。
 
 踩坑:
 
-- 不要同时设置 `external-ui-name` 和内嵌 dashboard。内嵌包只需要 `external-ui: dashboard` 加启动参数 `-ext-ui "${DASHBOARD_DIR}"`。
+- 内嵌包必须同时设置 `external-ui: dashboard`、`external-ui-name: MetaCubeXD` 和启动参数 `-ext-ui "${DASHBOARD_DIR}"`。
 - `9090` 是应用中心入口和控制 API 端口，不能随意变；代理端口冲突优先改 `mixed-port`。
 - 如果用户已有 `config.yaml` 是完整自定义配置，维护脚本不能擅自改端口。需要用户手动编辑 `<应用文件>/clash.meta/config/config.yaml` 后重启应用。
-- 如果继续看到 GitHub UI 下载日志，先检查运行时 `config.yaml` 是否还残留 `external-ui-name` 或 `external-ui-url`。
+- 如果继续看到 GitHub UI 下载日志，先检查运行时 `config.yaml` 是否缺少 `external-ui-name: MetaCubeXD` 或仍残留 `external-ui-url`。
 
 后续要求:
 
-- 构建脚本必须继续禁止默认配置和 `cmd/main` 出现 `external-ui-name:`、`external-ui-url:`、`mixed-port: 7890` 和 DoH bootstrap 域名。
+- 构建脚本必须校验默认配置和 `cmd/main` 使用 `external-ui-name: MetaCubeXD`，并继续禁止 `external-ui-url:`、`mixed-port: 7890` 和 DoH bootstrap 域名。
 - 文档里的默认代理端口要统一写 `7899`。
 
 ### 2026-06-21: geodata 不能依赖用户设备自动更新
@@ -1104,7 +1106,7 @@ Select-String -Path '.tmp\inspect-x86\cmd\main' -Pattern 'TRIM_PKGVAR}/bin|prepa
 - 直接访问 `http://<飞牛IP>:9090/ui/` 可以打开内嵌 MetaCubeXD。
 - 但飞牛桌面没有图标，应用中心卡片上也没有“打开”按钮。
 
-这是 `1.19.27-9` 到旧端口入口时期的历史现象。当前入口为 `/app/clash-meta/`，9090 不再接受局域网访问。
+这是 `1.19.27-9` 到旧端口入口时期的历史现象。当前入口为 `/app/clash-meta/ui/`，9090 不再接受局域网访问。
 
 根因:
 
@@ -1276,7 +1278,7 @@ geodata/geosite.dat
 - 如果密钥输入框里出现圆点，可能是浏览器或窗口自动填充，也可能是旧 endpoint 缓存；优先刷新并确认 `dashboard/config.js` 已注入当前 secret。
 - 如果用户手动设置了 `config.yaml` 的 `secret`，运行时 dashboard 会沿用它；外部 MetaCubeXD 也需要同步填写同一个值。
 - 如果用户把文档里的 `保留你原来的 secret` 这类占位符原样写进 `config.yaml`，`1.19.27-28` 及更早版本会把它当成真实密钥。`1.19.27-29` 起会识别这类占位符并重新生成真实 secret。
-- 浏览器路径是否位于 `/app/clash-meta/`
+- 浏览器路径是否位于 `/app/clash-meta/ui/`
 - `external-controller` 是否只监听 `127.0.0.1:9090`
 
 ### 2026-06-21: 空密钥存在安全风险
@@ -1339,7 +1341,7 @@ window.metacubexd.endpoint = {
 - 同时维护 `localStorage.endpointList` 和 `localStorage.selectedEndpoint`，注册并优先选中 `local-mihomo`。
 - 只在当前选中端点为空、失效、就是 `local-mihomo`，或旧端点 host 等于当前访问 host 时自动切换，避免覆盖用户手动添加的远程后端。
 
-当前实机排障应从 fnOS 桌面入口打开 `/app/clash-meta/`，并在日志中确认本机 controller 和 Unix Socket 都已启动。不要把 9090 改回 LAN 监听来绕过网关。
+当前实机排障应从 fnOS 桌面入口打开 `/app/clash-meta/ui/`，并在日志中确认本机 controller、`config/dashboard` 和 Unix Socket 都已启动。不要把 9090 改回 LAN 监听来绕过网关。
 
 ## 后续可改进项
 

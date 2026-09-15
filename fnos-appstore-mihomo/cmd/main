@@ -35,7 +35,7 @@ CONFIG_DIR="${APP_SHARE}/config"
 LOG_DIR="${APP_SHARE}/logs"
 RUN_DIR="${APP_VAR}/run"
 BIN_DIR="${APP_VAR}/bin"
-RUNTIME_DASHBOARD_DIR="${APP_VAR}/dashboard"
+RUNTIME_DASHBOARD_DIR="${CONFIG_DIR}/dashboard"
 PID_FILE="${RUN_DIR}/mihomo.pid"
 GATEWAY_PID_FILE="${RUN_DIR}/gateway.pid"
 GATEWAY_SOCKET="${APP_HOME}/clash-meta.sock"
@@ -666,6 +666,7 @@ ensure_config_runtime_settings() {
             next
         }
         /^[[:space:]]*external-ui-name[[:space:]]*:/ {
+            print "external-ui-name: MetaCubeXD"
             next
         }
         /^[[:space:]]*external-ui-url[[:space:]]*:/ {
@@ -684,6 +685,7 @@ ensure_config_runtime_settings() {
             if (external_ui == 0) {
                 print "external-ui: dashboard"
             }
+            print "external-ui-name: MetaCubeXD"
             if (geo_auto_update == 0) {
                 print "geo-auto-update: false"
             }
@@ -920,7 +922,7 @@ prepare_dashboard() {
     fi
 
     case "${RUNTIME_DASHBOARD_DIR}" in
-    "${APP_VAR}/dashboard")
+    "${CONFIG_DIR}/dashboard")
         rm -rf "${RUNTIME_DASHBOARD_DIR}"
         ;;
     *)

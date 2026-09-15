@@ -225,8 +225,8 @@ def validate_entry() -> None:
         raise RuntimeError("desktop entry must use gatewayPrefix=/app/clash-meta")
     if entry.get("gatewaySocket") != "clash-meta.sock":
         raise RuntimeError("desktop entry must use gatewaySocket=clash-meta.sock")
-    if entry.get("url") != "/app/clash-meta/":
-        raise RuntimeError("desktop entry must open /app/clash-meta/")
+    if entry.get("url") != "/app/clash-meta/ui/":
+        raise RuntimeError("desktop entry must open /app/clash-meta/ui/")
     if "port" in entry:
         raise RuntimeError("unified gateway desktop entry must not declare a port")
 
@@ -258,6 +258,7 @@ def validate_entry() -> None:
         "mixed-port: 7899",
         "external-controller: 127.0.0.1:9090",
         "external-ui: dashboard",
+        "external-ui-name: MetaCubeXD",
         "geo-auto-update: false",
         "    - 223.5.5.5",
         "    - 119.29.29.29",
@@ -266,7 +267,6 @@ def validate_entry() -> None:
             raise RuntimeError(f"{default_config_path} is missing {required_text!r}")
     for forbidden_text in (
         "mixed-port: 7890",
-        "external-ui-name:",
         "external-ui-url:",
         "https://dns.alidns.com/dns-query",
         "https://doh.pub/dns-query",
@@ -386,7 +386,6 @@ def validate_entry() -> None:
         if required_text not in cmd_main_text:
             raise RuntimeError(f"{cmd_main} is missing {required_text!r}")
     for forbidden_text in (
-        "external-ui-name: MetaCubeXD",
         "external-ui-url:",
         "https://dns.alidns.com/dns-query",
         "https://doh.pub/dns-query",

@@ -2,8 +2,8 @@
 
 ## 安装包选择
 
-- Intel / AMD 飞牛设备安装 `clash.meta_1.19.27-34_x86.fpk`。
-- ARM64 飞牛设备安装 `clash.meta_1.19.27-34_arm.fpk`。
+- Intel / AMD 飞牛设备安装 `clash.meta_1.19.27-35_x86.fpk`。
+- ARM64 飞牛设备安装 `clash.meta_1.19.27-35_arm.fpk`。
 - 这是原生应用包，不需要安装 Docker。
 
 ## 首次安装
@@ -33,7 +33,7 @@
 从飞牛桌面图标或应用中心的“打开”按钮进入。入口通过统一网关访问：
 
 ```text
-/app/clash-meta/
+/app/clash-meta/ui/
 ```
 
 不要填写或访问 `http://<飞牛IP>:9090`。从 `1.19.27-30` 开始，控制器只监听 NAS 本机 `127.0.0.1:9090`，由 fnOS 网关完成登录校验和转发。
@@ -107,5 +107,5 @@ fnOS gateway listening on .../clash-meta.sock
 
 - `context deadline exceeded`: 订阅地址或 DNS 不能直连；包内 geodata 本身不需要下载。
 - `mihomo rejected config`: 新配置语法或字段有误，检查日志和自动备份。
-- 应用运行但没有“打开”: 确认安装 `1.19.27-34`，必要时卸载旧包后重新安装以刷新入口元数据。
+- 应用运行但没有“打开”: 确认安装 `1.19.27-35`，必要时卸载旧包后重新安装以刷新入口元数据。
 - 统一网关返回 502: mihomo 未启动或本机 9090 冲突，检查同一日志中的前置错误。
